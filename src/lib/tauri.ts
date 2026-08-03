@@ -10,6 +10,8 @@ import {
   type ActivitySummary,
   type AdvancedAnalyticsRunRequest,
   type AdvancedAnalyticsRunResponse,
+  type AerobicDecouplingRequest,
+  type AerobicDecouplingResponse,
   type CountryActivityData,
   type HeatmapData,
   type HeatmapFilters,
@@ -51,6 +53,9 @@ export const getActivity = (id: number) => invoke<ActivityDetail>('get_activity'
 
 export const getActivitySamples = (id: number, query?: ActivitySampleQuery) =>
   invoke<ActivitySamplesResponse>('get_activity_samples', { id, query });
+
+export const getAerobicDecoupling = (request: AerobicDecouplingRequest) =>
+  invoke<AerobicDecouplingResponse>('get_aerobic_decoupling', { request });
 
 export const getHeatmapData = (filters?: HeatmapFilters) =>
   invoke<HeatmapData>('get_heatmap_data', { filters });

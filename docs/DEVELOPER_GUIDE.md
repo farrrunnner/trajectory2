@@ -101,6 +101,7 @@ Important behavior:
 │   │   ├── parser.rs    # TCX/FIT parsing into normalized activities
 │   │   ├── db.rs        # SQLite schema, migrations, and query layer
 │   │   ├── analytics.rs # advanced analytics computation
+│   │   ├── decoupling.rs # activity-level pace-HR decoupling and heart-rate drift
 │   │   ├── countries.rs # offline country lookup and activity aggregation
 │   │   └── settings.rs  # settings load/save and defaults
 │   ├── Cargo.toml
@@ -176,6 +177,7 @@ Current wrappers:
 - `listActivities`
 - `getActivity`
 - `getActivitySamples`
+- `getAerobicDecoupling`
 - `getHeatmapData`
 - `getCountryActivityData`
 - `runAdvancedAnalytics`
@@ -244,6 +246,7 @@ Registered Tauri commands:
 | `list_activities` | Query activity list |
 | `get_activity` | Get activity summary + route track |
 | `get_activity_samples` | Query/downsample chart samples |
+| `get_aerobic_decoupling` | Calculate full-resolution pace-HR decoupling and heart-rate drift for a selected activity range |
 | `get_heatmap_data` | Return heatmap tracks |
 | `get_country_activity_data` | Aggregate GPS samples into country activity counts and elapsed time |
 | `run_advanced_analytics` | Compute analytics payload |

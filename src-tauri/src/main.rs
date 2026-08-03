@@ -3,6 +3,7 @@
 mod analytics;
 mod countries;
 mod db;
+mod decoupling;
 mod models;
 mod parser;
 mod scanner;
@@ -13,8 +14,9 @@ use std::{fs, path::PathBuf};
 use anyhow::{Context, Result};
 use models::{
     ActivityDetail, ActivityFilters, ActivitySampleQuery, ActivitySamplesResponse, ActivitySummary,
-    AdvancedAnalyticsRunRequest, AdvancedAnalyticsRunResponse, CountryActivityData, HeatmapData,
-    HeatmapFilters, ScanDoneEvent, Settings,
+    AdvancedAnalyticsRunRequest, AdvancedAnalyticsRunResponse, AerobicDecouplingRequest,
+    AerobicDecouplingResponse, CountryActivityData, HeatmapData, HeatmapFilters, ScanDoneEvent,
+    Settings,
 };
 use tauri::{AppHandle, Manager, State};
 
@@ -274,6 +276,25 @@ async fn get_activity_samples(
 }
 
 #[tauri::command]
+async fn get_aerobic_decoupling(
+    request: AerobicDecouplingRequest,
+    state: State<'_, AppState>,
+) -> Result<AerobicDecouplingResponse, String> {
+    let db_path = state.db_path.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db::open_connection(&db_path).map_err(|err| err.to_string())?;
+        let detail = db::get_activity(&conn, request.activity_id).map_err(|err| err.to_string())?;
+        let samples = db::get_all_activity_samples(&conn, request.activity_id)
+            .map_err(|err| err.to_string())?;
+        decoupling::calculate_aerobic_decoupling(&request, &samples, &detail.pause_segments)
+            .map_err(|err| err.to_string())
+    })
+    .await
+    .map_err(|err| err.to_string())?
+}
+
+#[tauri::command]
 async fn get_heatmap_data(
     filters: Option<HeatmapFilters>,
     state: State<'_, AppState>,
@@ -374,6 +395,7 @@ fn main() {
             list_activities,
             get_activity,
             get_activity_samples,
+            get_aerobic_decoupling,
             get_heatmap_data,
             get_country_activity_data,
             run_advanced_analytics,

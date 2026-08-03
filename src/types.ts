@@ -95,6 +95,28 @@ export interface ActivitySamplesResponse {
   returnedSampleCount: number;
 }
 
+export type AerobicDecouplingMode = 'outdoor' | 'treadmill';
+export type AerobicDecouplingRangeAxis = 'elapsedTime' | 'movingTime' | 'distance';
+
+export interface AerobicDecouplingRange {
+  axis: AerobicDecouplingRangeAxis;
+  min: number;
+  max: number;
+}
+
+export interface AerobicDecouplingRequest {
+  activityId: number;
+  mode: AerobicDecouplingMode;
+  outdoorRange?: AerobicDecouplingRange;
+  treadmillSectionOne?: AerobicDecouplingRange;
+  treadmillSectionTwo?: AerobicDecouplingRange;
+}
+
+export interface AerobicDecouplingResponse {
+  paceHrDecouplingPct: number | null;
+  heartRateDriftPct: number | null;
+}
+
 export interface HeatmapData {
   tracks: TrackPoint[][];
   activityCount: number;

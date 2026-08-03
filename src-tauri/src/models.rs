@@ -148,6 +148,49 @@ pub struct ActivitySamplesResponse {
     pub returned_sample_count: usize,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AerobicDecouplingMode {
+    Outdoor,
+    Treadmill,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AerobicDecouplingRangeAxis {
+    ElapsedTime,
+    MovingTime,
+    Distance,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AerobicDecouplingRange {
+    pub axis: AerobicDecouplingRangeAxis,
+    pub min: f64,
+    pub max: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AerobicDecouplingRequest {
+    pub activity_id: i64,
+    pub mode: AerobicDecouplingMode,
+    #[serde(default)]
+    pub outdoor_range: Option<AerobicDecouplingRange>,
+    #[serde(default)]
+    pub treadmill_section_one: Option<AerobicDecouplingRange>,
+    #[serde(default)]
+    pub treadmill_section_two: Option<AerobicDecouplingRange>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AerobicDecouplingResponse {
+    pub pace_hr_decoupling_pct: Option<f64>,
+    pub heart_rate_drift_pct: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HeatmapFilters {

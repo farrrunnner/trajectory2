@@ -17,7 +17,7 @@ import {
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import maplibregl, { type GeoJSONSource } from 'maplibre-gl';
 
-import { getActivity, getActivitySamples } from '@/lib/tauri';
+import { getActivity, getActivitySamples, getAerobicDecoupling } from '@/lib/tauri';
 import {
   formatDateTime,
   formatDistanceKm,
@@ -82,7 +82,14 @@ import { useManagedMapLibre } from '@/lib/useManagedMapLibre';
 import { MaximizableMapFrame } from '@/components/MaximizableMapFrame';
 import { MetricCard } from '@/components/MetricCard';
 import { useAppStore } from '@/store/useAppStore';
-import type { ActivityDetail, ActivitySample, TrackPoint } from '@/types';
+import type {
+  ActivityDetail,
+  ActivitySample,
+  AerobicDecouplingMode,
+  AerobicDecouplingRange,
+  AerobicDecouplingResponse,
+  TrackPoint
+} from '@/types';
 
 const ACTIVITY_ROUTE_SOURCE_ID = 'activity-route-source';
 const ACTIVITY_ROUTE_LAYER_ID = 'activity-route-layer';
@@ -90,6 +97,10 @@ const ACTIVITY_ROUTE_HOVER_SOURCE_ID = 'activity-route-hover-source';
 const ACTIVITY_ROUTE_HOVER_OUTER_LAYER_ID = 'activity-route-hover-outer-layer';
 const ACTIVITY_ROUTE_HOVER_INNER_LAYER_ID = 'activity-route-hover-inner-layer';
 const ROUTE_HOVER_MARKER_SMOOTHING_MS = 10;
+const EMPTY_DECOUPLING_RESULT: AerobicDecouplingResponse = {
+  paceHrDecouplingPct: null,
+  heartRateDriftPct: null
+};
 type ActivityRouteMapHandle = {
   setHoverTarget: (coordinate: RouteHoverCoordinate) => void;
   clearHoverTarget: () => void;
@@ -235,6 +246,37 @@ function PauseVisibilityToggle({
       </button>
     </div>
   );
+}
+
+function DecouplingModeToggle({
+  mode,
+  onChange
+}: {
+  mode: AerobicDecouplingMode;
+  onChange: (mode: AerobicDecouplingMode) => void;
+}) {
+  return (
+    <div className="inline-flex rounded-lg border border-border bg-bg/40 p-1">
+      {(['outdoor', 'treadmill'] as const).map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onChange(option)}
+          aria-pressed={mode === option}
+          className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${
+            mode === option ? 'bg-panel text-foreground shadow-sm' : 'text-muted hover:text-foreground'
+          }`}
+        >
+          {option}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function formatDriftPercentage(value: number): string {
+  const normalized = Math.abs(value) < 0.05 ? 0 : value;
+  return `${normalized.toFixed(1)}%`;
 }
 
 function CombinedChartTooltip({
@@ -986,9 +1028,16 @@ export function ActivityDetailPage() {
   const [chartSeriesVisibility, setChartSeriesVisibility] = useState<ChartSeriesVisibility>(() =>
     defaultChartSeriesVisibility()
   );
+  const [decouplingMode, setDecouplingMode] = useState<AerobicDecouplingMode>('outdoor');
+  const [treadmillSectionOne, setTreadmillSectionOne] = useState<ChartZoomDomain | null>(null);
+  const [treadmillSectionTwo, setTreadmillSectionTwo] = useState<ChartZoomDomain | null>(null);
+  const [decouplingResult, setDecouplingResult] = useState<AerobicDecouplingResponse>(
+    EMPTY_DECOUPLING_RESULT
+  );
   const [hoveredHeartRateZoneIndex, setHoveredHeartRateZoneIndex] = useState<number | null>(null);
   const chartSamplesRequestRef = useRef(0);
   const heartRateZoneSamplesRequestRef = useRef(0);
+  const decouplingRequestRef = useRef(0);
   const routeMapRef = useRef<ActivityRouteMapHandle | null>(null);
   const accentTheme = useAppStore((state) => state.settings?.accentTheme);
   const chartMaxSamples = useAppStore((state) => state.settings?.chartMaxSamples ?? 2000);
@@ -1001,6 +1050,12 @@ export function ActivityDetailPage() {
   const chartXAxisMode: ChartXAxisMode = hasGpsTrack ? selectedChartXAxisMode : 'time';
   const shouldHidePausedTime = chartXAxisMode === 'time' && hidePausedTime;
   const hasPauseSegments = Boolean(detail && detail.pauseSegments.length > 0);
+  const isFitRunningActivity = Boolean(
+    detail &&
+      detail.summary.sourcePath.toLowerCase().endsWith('.fit') &&
+      detail.summary.category.toLowerCase() === 'running' &&
+      (detail.summary.avgHr != null || detail.summary.minHr != null || detail.summary.maxHr != null)
+  );
 
   useEffect(() => {
     if (!id) {
@@ -1043,7 +1098,11 @@ export function ActivityDetailPage() {
     }
 
     setSelectedChartXAxisMode(detail.summary.hasGps && detail.track.length > 0 ? 'distance' : 'time');
-    setHidePausedTime(false);
+    setHidePausedTime(!detail.summary.hasGps);
+    setDecouplingMode(detail.summary.hasGps ? 'outdoor' : 'treadmill');
+    setTreadmillSectionOne(null);
+    setTreadmillSectionTwo(null);
+    setDecouplingResult(EMPTY_DECOUPLING_RESULT);
   }, [detail]);
 
   const combinedChart = useMemo<CombinedChartModel>(() => {
@@ -1205,6 +1264,78 @@ export function ActivityDetailPage() {
   const setChartZoomDomain = chartZoom.setZoomDomain;
   const activeChartXAxisDomain = chartZoomDomain ?? fullChartXAxisDomain;
   const chartSampleDistanceZoomDomain = chartXAxisMode === 'distance' ? chartZoomDomain : null;
+
+  useEffect(() => {
+    decouplingRequestRef.current += 1;
+    const requestId = decouplingRequestRef.current;
+
+    if (!detail || !isFitRunningActivity) {
+      setDecouplingResult(EMPTY_DECOUPLING_RESULT);
+      return;
+    }
+
+    let outdoorRange: AerobicDecouplingRange | undefined;
+    if (decouplingMode === 'outdoor' && chartZoomDomain) {
+      outdoorRange = {
+        axis:
+          chartXAxisMode === 'distance'
+            ? 'distance'
+            : shouldHidePausedTime
+              ? 'movingTime'
+              : 'elapsedTime',
+        min: chartZoomDomain[0],
+        max: chartZoomDomain[1]
+      };
+    }
+
+    if (
+      decouplingMode === 'treadmill' &&
+      (!treadmillSectionOne ||
+        !treadmillSectionTwo ||
+        treadmillSectionTwo[0] < treadmillSectionOne[1])
+    ) {
+      setDecouplingResult(EMPTY_DECOUPLING_RESULT);
+      return;
+    }
+
+    setDecouplingResult(EMPTY_DECOUPLING_RESULT);
+    const loadDecoupling = async () => {
+      try {
+        const response = await getAerobicDecoupling({
+          activityId: detail.summary.id,
+          mode: decouplingMode,
+          outdoorRange,
+          treadmillSectionOne:
+            decouplingMode === 'treadmill' && treadmillSectionOne
+              ? { axis: 'movingTime', min: treadmillSectionOne[0], max: treadmillSectionOne[1] }
+              : undefined,
+          treadmillSectionTwo:
+            decouplingMode === 'treadmill' && treadmillSectionTwo
+              ? { axis: 'movingTime', min: treadmillSectionTwo[0], max: treadmillSectionTwo[1] }
+              : undefined
+        });
+        if (decouplingRequestRef.current === requestId) {
+          setDecouplingResult(response);
+        }
+      } catch (err) {
+        if (decouplingRequestRef.current === requestId) {
+          setDecouplingResult(EMPTY_DECOUPLING_RESULT);
+          console.error('Failed to calculate aerobic decoupling', err);
+        }
+      }
+    };
+
+    void loadDecoupling();
+  }, [
+    chartXAxisMode,
+    chartZoomDomain,
+    decouplingMode,
+    detail,
+    isFitRunningActivity,
+    shouldHidePausedTime,
+    treadmillSectionOne,
+    treadmillSectionTwo
+  ]);
 
   useEffect(() => {
     if (!detail) {
@@ -1379,6 +1510,30 @@ export function ActivityDetailPage() {
   const handleChartMouseLeave = () => {
     routeMapRef.current?.clearHoverTarget();
     chartZoom.onMouseLeave();
+  };
+  const handleDecouplingModeChange = (mode: AerobicDecouplingMode) => {
+    setDecouplingMode(mode);
+    setTreadmillSectionOne(null);
+    setTreadmillSectionTwo(null);
+    setDecouplingResult(EMPTY_DECOUPLING_RESULT);
+    setChartZoomDomain(null);
+    chartZoom.clearSelection();
+    if (mode === 'treadmill') {
+      setSelectedChartXAxisMode('time');
+      setHidePausedTime(true);
+    }
+  };
+  const captureTreadmillSection = (section: 1 | 2) => {
+    if (!chartZoomDomain) {
+      return;
+    }
+    if (section === 1) {
+      setTreadmillSectionOne(chartZoomDomain);
+    } else {
+      setTreadmillSectionTwo(chartZoomDomain);
+    }
+    setChartZoomDomain(null);
+    chartZoom.clearSelection();
   };
 
   if (loading) {
@@ -1556,7 +1711,9 @@ export function ActivityDetailPage() {
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-start justify-end gap-2">
-                  {hasPauseSegments && chartXAxisMode === 'time' ? (
+                  {hasPauseSegments &&
+                  chartXAxisMode === 'time' &&
+                  (!isFitRunningActivity || decouplingMode !== 'treadmill') ? (
                     <div className="shrink-0">
                       <PauseVisibilityToggle hidePauses={hidePausedTime} onChange={setHidePausedTime} />
                     </div>
@@ -1576,6 +1733,44 @@ export function ActivityDetailPage() {
                 </div>
               </div>
             </div>
+
+            {isFitRunningActivity ? (
+              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/70 pt-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <DecouplingModeToggle mode={decouplingMode} onChange={handleDecouplingModeChange} />
+                  {decouplingMode === 'treadmill' ? (
+                    <>
+                      <button
+                        type="button"
+                        disabled={!chartZoomDomain}
+                        onClick={() => captureTreadmillSection(1)}
+                        className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted enabled:hover:text-foreground disabled:opacity-50"
+                      >
+                        Set Section 1{treadmillSectionOne ? ' ✓' : ''}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!chartZoomDomain}
+                        onClick={() => captureTreadmillSection(2)}
+                        className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted enabled:hover:text-foreground disabled:opacity-50"
+                      >
+                        Set Section 2{treadmillSectionTwo ? ' ✓' : ''}
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+                <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-sm font-medium text-foreground">
+                  {decouplingMode === 'outdoor' && decouplingResult.paceHrDecouplingPct != null ? (
+                    <span>
+                      Pace–HR decoupling: {formatDriftPercentage(decouplingResult.paceHrDecouplingPct)}
+                    </span>
+                  ) : null}
+                  {decouplingResult.heartRateDriftPct != null ? (
+                    <span>Heart Rate Drift: {formatDriftPercentage(decouplingResult.heartRateDriftPct)}</span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
 
             {chartMode === 'combined' ? (
               <>
