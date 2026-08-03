@@ -150,13 +150,6 @@ pub struct ActivitySamplesResponse {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum AerobicDecouplingMode {
-    Outdoor,
-    Treadmill,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub enum AerobicDecouplingRangeAxis {
     ElapsedTime,
     MovingTime,
@@ -175,13 +168,8 @@ pub struct AerobicDecouplingRange {
 #[serde(rename_all = "camelCase")]
 pub struct AerobicDecouplingRequest {
     pub activity_id: i64,
-    pub mode: AerobicDecouplingMode,
     #[serde(default)]
-    pub outdoor_range: Option<AerobicDecouplingRange>,
-    #[serde(default)]
-    pub treadmill_section_one: Option<AerobicDecouplingRange>,
-    #[serde(default)]
-    pub treadmill_section_two: Option<AerobicDecouplingRange>,
+    pub range: Option<AerobicDecouplingRange>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

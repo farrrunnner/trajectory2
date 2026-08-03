@@ -85,7 +85,6 @@ import { useAppStore } from '@/store/useAppStore';
 import type {
   ActivityDetail,
   ActivitySample,
-  AerobicDecouplingMode,
   AerobicDecouplingRange,
   AerobicDecouplingResponse,
   TrackPoint
@@ -244,32 +243,6 @@ function PauseVisibilityToggle({
       >
         Include pause
       </button>
-    </div>
-  );
-}
-
-function DecouplingModeToggle({
-  mode,
-  onChange
-}: {
-  mode: AerobicDecouplingMode;
-  onChange: (mode: AerobicDecouplingMode) => void;
-}) {
-  return (
-    <div className="inline-flex rounded-lg border border-border bg-bg/40 p-1">
-      {(['outdoor', 'treadmill'] as const).map((option) => (
-        <button
-          key={option}
-          type="button"
-          onClick={() => onChange(option)}
-          aria-pressed={mode === option}
-          className={`rounded-md px-2.5 py-1 text-xs capitalize transition-colors ${
-            mode === option ? 'bg-panel text-foreground shadow-sm' : 'text-muted hover:text-foreground'
-          }`}
-        >
-          {option}
-        </button>
-      ))}
     </div>
   );
 }
@@ -1028,9 +1001,6 @@ export function ActivityDetailPage() {
   const [chartSeriesVisibility, setChartSeriesVisibility] = useState<ChartSeriesVisibility>(() =>
     defaultChartSeriesVisibility()
   );
-  const [decouplingMode, setDecouplingMode] = useState<AerobicDecouplingMode>('outdoor');
-  const [treadmillSectionOne, setTreadmillSectionOne] = useState<ChartZoomDomain | null>(null);
-  const [treadmillSectionTwo, setTreadmillSectionTwo] = useState<ChartZoomDomain | null>(null);
   const [decouplingResult, setDecouplingResult] = useState<AerobicDecouplingResponse>(
     EMPTY_DECOUPLING_RESULT
   );
@@ -1099,9 +1069,6 @@ export function ActivityDetailPage() {
 
     setSelectedChartXAxisMode(detail.summary.hasGps && detail.track.length > 0 ? 'distance' : 'time');
     setHidePausedTime(!detail.summary.hasGps);
-    setDecouplingMode(detail.summary.hasGps ? 'outdoor' : 'treadmill');
-    setTreadmillSectionOne(null);
-    setTreadmillSectionTwo(null);
     setDecouplingResult(EMPTY_DECOUPLING_RESULT);
   }, [detail]);
 
@@ -1274,9 +1241,9 @@ export function ActivityDetailPage() {
       return;
     }
 
-    let outdoorRange: AerobicDecouplingRange | undefined;
-    if (decouplingMode === 'outdoor' && chartZoomDomain) {
-      outdoorRange = {
+    let range: AerobicDecouplingRange | undefined;
+    if (chartZoomDomain) {
+      range = {
         axis:
           chartXAxisMode === 'distance'
             ? 'distance'
@@ -1288,31 +1255,12 @@ export function ActivityDetailPage() {
       };
     }
 
-    if (
-      decouplingMode === 'treadmill' &&
-      (!treadmillSectionOne ||
-        !treadmillSectionTwo ||
-        treadmillSectionTwo[0] < treadmillSectionOne[1])
-    ) {
-      setDecouplingResult(EMPTY_DECOUPLING_RESULT);
-      return;
-    }
-
     setDecouplingResult(EMPTY_DECOUPLING_RESULT);
     const loadDecoupling = async () => {
       try {
         const response = await getAerobicDecoupling({
           activityId: detail.summary.id,
-          mode: decouplingMode,
-          outdoorRange,
-          treadmillSectionOne:
-            decouplingMode === 'treadmill' && treadmillSectionOne
-              ? { axis: 'movingTime', min: treadmillSectionOne[0], max: treadmillSectionOne[1] }
-              : undefined,
-          treadmillSectionTwo:
-            decouplingMode === 'treadmill' && treadmillSectionTwo
-              ? { axis: 'movingTime', min: treadmillSectionTwo[0], max: treadmillSectionTwo[1] }
-              : undefined
+          range
         });
         if (decouplingRequestRef.current === requestId) {
           setDecouplingResult(response);
@@ -1329,12 +1277,9 @@ export function ActivityDetailPage() {
   }, [
     chartXAxisMode,
     chartZoomDomain,
-    decouplingMode,
     detail,
     isFitRunningActivity,
-    shouldHidePausedTime,
-    treadmillSectionOne,
-    treadmillSectionTwo
+    shouldHidePausedTime
   ]);
 
   useEffect(() => {
@@ -1510,30 +1455,6 @@ export function ActivityDetailPage() {
   const handleChartMouseLeave = () => {
     routeMapRef.current?.clearHoverTarget();
     chartZoom.onMouseLeave();
-  };
-  const handleDecouplingModeChange = (mode: AerobicDecouplingMode) => {
-    setDecouplingMode(mode);
-    setTreadmillSectionOne(null);
-    setTreadmillSectionTwo(null);
-    setDecouplingResult(EMPTY_DECOUPLING_RESULT);
-    setChartZoomDomain(null);
-    chartZoom.clearSelection();
-    if (mode === 'treadmill') {
-      setSelectedChartXAxisMode('time');
-      setHidePausedTime(true);
-    }
-  };
-  const captureTreadmillSection = (section: 1 | 2) => {
-    if (!chartZoomDomain) {
-      return;
-    }
-    if (section === 1) {
-      setTreadmillSectionOne(chartZoomDomain);
-    } else {
-      setTreadmillSectionTwo(chartZoomDomain);
-    }
-    setChartZoomDomain(null);
-    chartZoom.clearSelection();
   };
 
   if (loading) {
@@ -1711,9 +1632,7 @@ export function ActivityDetailPage() {
                   </div>
                 ) : null}
                 <div className="flex flex-wrap items-start justify-end gap-2">
-                  {hasPauseSegments &&
-                  chartXAxisMode === 'time' &&
-                  (!isFitRunningActivity || decouplingMode !== 'treadmill') ? (
+                  {hasPauseSegments && chartXAxisMode === 'time' ? (
                     <div className="shrink-0">
                       <PauseVisibilityToggle hidePauses={hidePausedTime} onChange={setHidePausedTime} />
                     </div>
@@ -1736,31 +1655,11 @@ export function ActivityDetailPage() {
 
             {isFitRunningActivity ? (
               <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/70 pt-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <DecouplingModeToggle mode={decouplingMode} onChange={handleDecouplingModeChange} />
-                  {decouplingMode === 'treadmill' ? (
-                    <>
-                      <button
-                        type="button"
-                        disabled={!chartZoomDomain}
-                        onClick={() => captureTreadmillSection(1)}
-                        className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted enabled:hover:text-foreground disabled:opacity-50"
-                      >
-                        Set Section 1{treadmillSectionOne ? ' ✓' : ''}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!chartZoomDomain}
-                        onClick={() => captureTreadmillSection(2)}
-                        className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted enabled:hover:text-foreground disabled:opacity-50"
-                      >
-                        Set Section 2{treadmillSectionTwo ? ' ✓' : ''}
-                      </button>
-                    </>
-                  ) : null}
-                </div>
+                <span className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted">
+                  HR Decoupling/Drift
+                </span>
                 <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-sm font-medium text-foreground">
-                  {decouplingMode === 'outdoor' && decouplingResult.paceHrDecouplingPct != null ? (
+                  {decouplingResult.paceHrDecouplingPct != null ? (
                     <span>
                       Pace–HR decoupling: {formatDriftPercentage(decouplingResult.paceHrDecouplingPct)}
                     </span>

@@ -116,7 +116,12 @@ jobs:
           bash scripts/verify-version-alignment.sh "$expected_version"
 
       - name: Build desktop bundles
+        env:
+          APPLE_SIGNING_IDENTITY: "-"
         run: npm run tauri build -- --bundles app,dmg
+
+      - name: Verify macOS app signature
+        run: codesign --verify --deep --strict src-tauri/target/release/bundle/macos/*.app
 
       - name: Upload preview artifacts
         uses: actions/upload-artifact@v4

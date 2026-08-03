@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Result};
 
 use crate::models::{
-    ActivitySample, AerobicDecouplingMode, AerobicDecouplingRange, AerobicDecouplingRangeAxis,
-    AerobicDecouplingRequest, AerobicDecouplingResponse, PauseSegment,
+    ActivitySample, AerobicDecouplingRange, AerobicDecouplingRangeAxis, AerobicDecouplingRequest,
+    AerobicDecouplingResponse, PauseSegment,
 };
 
 const MAX_OBSERVED_INTERVAL_SECONDS: f64 = 30.0;
@@ -76,64 +76,21 @@ pub fn calculate_aerobic_decoupling(
     samples: &[ActivitySample],
     pause_segments: &[PauseSegment],
 ) -> Result<AerobicDecouplingResponse> {
-    match request.mode {
-        AerobicDecouplingMode::Outdoor => {
-            if let Some(range) = &request.outdoor_range {
-                validate_range(range)?;
-            }
-            let pieces =
-                build_interval_pieces(samples, pause_segments, request.outdoor_range.as_ref());
-            let (first, second) = split_pieces_in_half(&pieces);
-            Ok(AerobicDecouplingResponse {
-                pace_hr_decoupling_pct: percentage_decline(
-                    first.efficiency_factor(),
-                    second.efficiency_factor(),
-                ),
-                heart_rate_drift_pct: percentage_increase(
-                    first.average_heart_rate(),
-                    second.average_heart_rate(),
-                ),
-            })
-        }
-        AerobicDecouplingMode::Treadmill => {
-            let section_one = request
-                .treadmill_section_one
-                .as_ref()
-                .ok_or_else(|| anyhow!("treadmill section one is required"))?;
-            let section_two = request
-                .treadmill_section_two
-                .as_ref()
-                .ok_or_else(|| anyhow!("treadmill section two is required"))?;
-            validate_range(section_one)?;
-            validate_range(section_two)?;
-            if section_one.axis != AerobicDecouplingRangeAxis::MovingTime
-                || section_two.axis != AerobicDecouplingRangeAxis::MovingTime
-            {
-                return Err(anyhow!("treadmill sections must use moving time"));
-            }
-            if section_two.min < section_one.max {
-                return Err(anyhow!("treadmill section two must follow section one"));
-            }
-
-            let first = summarize_pieces(&build_interval_pieces(
-                samples,
-                pause_segments,
-                Some(section_one),
-            ));
-            let second = summarize_pieces(&build_interval_pieces(
-                samples,
-                pause_segments,
-                Some(section_two),
-            ));
-            Ok(AerobicDecouplingResponse {
-                pace_hr_decoupling_pct: None,
-                heart_rate_drift_pct: percentage_increase(
-                    first.average_heart_rate(),
-                    second.average_heart_rate(),
-                ),
-            })
-        }
+    if let Some(range) = &request.range {
+        validate_range(range)?;
     }
+    let pieces = build_interval_pieces(samples, pause_segments, request.range.as_ref());
+    let (first, second) = split_pieces_in_half(&pieces);
+    Ok(AerobicDecouplingResponse {
+        pace_hr_decoupling_pct: percentage_decline(
+            first.efficiency_factor(),
+            second.efficiency_factor(),
+        ),
+        heart_rate_drift_pct: percentage_increase(
+            first.average_heart_rate(),
+            second.average_heart_rate(),
+        ),
+    })
 }
 
 fn validate_range(range: &AerobicDecouplingRange) -> Result<()> {
@@ -334,14 +291,6 @@ fn split_pieces_in_half(pieces: &[IntervalPiece]) -> (HalfStats, HalfStats) {
     (first, second)
 }
 
-fn summarize_pieces(pieces: &[IntervalPiece]) -> HalfStats {
-    let mut stats = HalfStats::default();
-    for piece in pieces {
-        stats.add(*piece);
-    }
-    stats
-}
-
 fn percentage_increase(first: Option<f64>, second: Option<f64>) -> Option<f64> {
     let (Some(first), Some(second)) = (first, second) else {
         return None;
@@ -396,13 +345,10 @@ mod tests {
         }
     }
 
-    fn outdoor_request(range: Option<AerobicDecouplingRange>) -> AerobicDecouplingRequest {
+    fn request(range: Option<AerobicDecouplingRange>) -> AerobicDecouplingRequest {
         AerobicDecouplingRequest {
             activity_id: 1,
-            mode: AerobicDecouplingMode::Outdoor,
-            outdoor_range: range,
-            treadmill_section_one: None,
-            treadmill_section_two: None,
+            range,
         }
     }
 
@@ -430,7 +376,7 @@ mod tests {
     #[test]
     fn constant_speed_and_heart_rate_produce_zero() {
         let result = calculate_aerobic_decoupling(
-            &outdoor_request(None),
+            &request(None),
             &constant_half_samples(140.0, 140.0, 3.0, 3.0),
             &[],
         )
@@ -442,7 +388,7 @@ mod tests {
     #[test]
     fn constant_speed_preserves_distinct_decoupling_and_hr_drift_formulas() {
         let result = calculate_aerobic_decoupling(
-            &outdoor_request(None),
+            &request(None),
             &constant_half_samples(140.0, 150.0, 3.0, 3.0),
             &[],
         )
@@ -451,7 +397,7 @@ mod tests {
         assert_close(result.heart_rate_drift_pct, 7.142_857_1);
 
         let result = calculate_aerobic_decoupling(
-            &outdoor_request(None),
+            &request(None),
             &constant_half_samples(144.0, 151.0, 3.0, 3.0),
             &[],
         )
@@ -463,7 +409,7 @@ mod tests {
     #[test]
     fn speed_loss_and_improvement_keep_the_expected_sign() {
         let result = calculate_aerobic_decoupling(
-            &outdoor_request(None),
+            &request(None),
             &constant_half_samples(140.0, 140.0, 3.0, 2.7),
             &[],
         )
@@ -471,7 +417,7 @@ mod tests {
         assert_close(result.pace_hr_decoupling_pct, 10.0);
 
         let improved = calculate_aerobic_decoupling(
-            &outdoor_request(None),
+            &request(None),
             &constant_half_samples(150.0, 140.0, 3.0, 3.0),
             &[],
         )
@@ -488,7 +434,7 @@ mod tests {
             sample(30.0, None, Some(3.0), Some(200.0)),
             sample(40.0, None, Some(3.0), Some(200.0)),
         ];
-        let result = calculate_aerobic_decoupling(&outdoor_request(None), &samples, &[]).unwrap();
+        let result = calculate_aerobic_decoupling(&request(None), &samples, &[]).unwrap();
         assert_close(result.heart_rate_drift_pct, 33.333_333_3);
     }
 
@@ -514,8 +460,7 @@ mod tests {
             start_timestamp: None,
             end_timestamp: None,
         }];
-        let result =
-            calculate_aerobic_decoupling(&outdoor_request(None), &samples, &pauses).unwrap();
+        let result = calculate_aerobic_decoupling(&request(None), &samples, &pauses).unwrap();
         assert_close(result.heart_rate_drift_pct, 100.0);
     }
 
@@ -527,14 +472,13 @@ mod tests {
             sample(100.0, None, Some(3.0), Some(150.0)),
             sample(110.0, None, Some(3.0), Some(150.0)),
         ];
-        let sparse_result =
-            calculate_aerobic_decoupling(&outdoor_request(None), &sparse, &[]).unwrap();
+        let sparse_result = calculate_aerobic_decoupling(&request(None), &sparse, &[]).unwrap();
         assert_eq!(sparse_result.pace_hr_decoupling_pct, None);
         assert_eq!(sparse_result.heart_rate_drift_pct, None);
 
         let missing_speed = constant_half_samples(140.0, 150.0, 0.0, 0.0);
         let missing_speed_result =
-            calculate_aerobic_decoupling(&outdoor_request(None), &missing_speed, &[]).unwrap();
+            calculate_aerobic_decoupling(&request(None), &missing_speed, &[]).unwrap();
         assert_eq!(missing_speed_result.pace_hr_decoupling_pct, None);
         assert!(missing_speed_result.heart_rate_drift_pct.is_some());
     }
@@ -567,32 +511,9 @@ mod tests {
             },
         ] {
             let result =
-                calculate_aerobic_decoupling(&outdoor_request(Some(range)), &samples, &[]).unwrap();
+                calculate_aerobic_decoupling(&request(Some(range)), &samples, &[]).unwrap();
             assert!(result.pace_hr_decoupling_pct.is_some());
             assert!(result.heart_rate_drift_pct.is_some());
         }
-    }
-
-    #[test]
-    fn treadmill_uses_two_moving_time_sections() {
-        let samples = constant_half_samples(140.0, 150.0, 3.0, 3.0);
-        let request = AerobicDecouplingRequest {
-            activity_id: 1,
-            mode: AerobicDecouplingMode::Treadmill,
-            outdoor_range: None,
-            treadmill_section_one: Some(AerobicDecouplingRange {
-                axis: AerobicDecouplingRangeAxis::MovingTime,
-                min: 0.0,
-                max: 50.0,
-            }),
-            treadmill_section_two: Some(AerobicDecouplingRange {
-                axis: AerobicDecouplingRangeAxis::MovingTime,
-                min: 50.0,
-                max: 100.0,
-            }),
-        };
-        let result = calculate_aerobic_decoupling(&request, &samples, &[]).unwrap();
-        assert_eq!(result.pace_hr_decoupling_pct, None);
-        assert_close(result.heart_rate_drift_pct, 7.142_857_1);
     }
 }

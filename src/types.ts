@@ -95,7 +95,6 @@ export interface ActivitySamplesResponse {
   returnedSampleCount: number;
 }
 
-export type AerobicDecouplingMode = 'outdoor' | 'treadmill';
 export type AerobicDecouplingRangeAxis = 'elapsedTime' | 'movingTime' | 'distance';
 
 export interface AerobicDecouplingRange {
@@ -106,10 +105,7 @@ export interface AerobicDecouplingRange {
 
 export interface AerobicDecouplingRequest {
   activityId: number;
-  mode: AerobicDecouplingMode;
-  outdoorRange?: AerobicDecouplingRange;
-  treadmillSectionOne?: AerobicDecouplingRange;
-  treadmillSectionTwo?: AerobicDecouplingRange;
+  range?: AerobicDecouplingRange;
 }
 
 export interface AerobicDecouplingResponse {

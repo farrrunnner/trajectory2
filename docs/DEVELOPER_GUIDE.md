@@ -397,7 +397,7 @@ Triggered manually from GitHub Actions.
 
 Builds downloadable artifacts without creating a GitHub release:
 
-- macOS: `.app` + `.dmg` (optional)
+- macOS: ad-hoc signed `.app` + `.dmg` (optional)
 - Windows: `.exe` (NSIS) + `.msi`
 - Linux: `.deb` + `.AppImage`
 
