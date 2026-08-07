@@ -1,10 +1,8 @@
 import { formatDuration } from '@/lib/format';
-import type { ActivitySample } from '@/types';
+import { heartRateZoneIndexForBpm } from '@/lib/activityDetail/activityMetrics';
 
 const COMBINED_CHART_OUTER_PADDING = 3;
 const COMBINED_CHART_BAND_GAP = 4;
-const DEFAULT_HEART_RATE_ZONE_UPPER_BOUNDS_BPM = [120, 140, 160, 180] as const;
-const HEART_RATE_ZONE_COLORS = ['#FEE2E2', '#FCA5A5', '#F87171', '#DC2626', '#7F1D1D'] as const;
 
 export const CHART_LINE_COLORS = {
   speed: '#2563EB',
@@ -42,14 +40,6 @@ export type ChartSeriesVisibility = Record<ChartSeriesKey, boolean>;
 export type ChartBand = { min: number; max: number };
 export type ChartZoomDomain = [number, number];
 export type RouteHoverCoordinate = { lat: number; lon: number } | null;
-export type HeartRateZoneSlice = {
-  zoneIndex: number;
-  label: string;
-  rangeLabel: string;
-  color: string;
-  seconds: number;
-  percent: number;
-};
 export type ZoneHighlightSegment = { start: number; end: number };
 
 export interface CombinedChartPoint {
@@ -333,96 +323,6 @@ export function formatPaceTick(secondsPerKm: number): string {
   const minutes = Math.floor(rounded / 60);
   const seconds = rounded % 60;
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
-
-export function normalizeHeartRateZoneUpperBounds(rawBounds: number[] | undefined): number[] {
-  if (!Array.isArray(rawBounds) || rawBounds.length !== 4) {
-    return [...DEFAULT_HEART_RATE_ZONE_UPPER_BOUNDS_BPM];
-  }
-
-  const parsed = rawBounds.map((value) => Math.round(Number(value)));
-  if (parsed.some((value) => !Number.isFinite(value) || value < 40 || value > 260)) {
-    return [...DEFAULT_HEART_RATE_ZONE_UPPER_BOUNDS_BPM];
-  }
-
-  for (let index = 1; index < parsed.length; index += 1) {
-    if (parsed[index] <= parsed[index - 1]) {
-      return [...DEFAULT_HEART_RATE_ZONE_UPPER_BOUNDS_BPM];
-    }
-  }
-
-  return parsed;
-}
-
-export function heartRateZoneIndexForBpm(bpm: number, upperBoundsBpm: number[]): number {
-  for (let index = 0; index < upperBoundsBpm.length; index += 1) {
-    if (bpm <= upperBoundsBpm[index]) {
-      return index;
-    }
-  }
-
-  return upperBoundsBpm.length;
-}
-
-function heartRateZoneRangeLabel(zoneIndex: number, upperBoundsBpm: number[]): string {
-  if (zoneIndex === 0) {
-    return `≤ ${upperBoundsBpm[0]} bpm`;
-  }
-
-  if (zoneIndex < upperBoundsBpm.length) {
-    return `${upperBoundsBpm[zoneIndex - 1] + 1}-${upperBoundsBpm[zoneIndex]} bpm`;
-  }
-
-  return `≥ ${upperBoundsBpm[upperBoundsBpm.length - 1] + 1} bpm`;
-}
-
-export function buildHeartRateZoneBreakdown(
-  samples: ActivitySample[],
-  upperBoundsBpm: number[]
-): { slices: HeartRateZoneSlice[]; trackedSeconds: number } | null {
-  if (samples.length < 2) {
-    return null;
-  }
-
-  const zoneSeconds = [0, 0, 0, 0, 0];
-  let previousHrSample: { elapsedSeconds: number; heartRate: number } | null = null;
-
-  for (const sample of samples) {
-    const elapsedSeconds = Number(sample.elapsedSeconds);
-    const heartRate = sample.heartRate == null ? NaN : Number(sample.heartRate);
-
-    if (!Number.isFinite(elapsedSeconds)) {
-      continue;
-    }
-
-    if (previousHrSample != null && elapsedSeconds > previousHrSample.elapsedSeconds) {
-      const deltaSeconds = elapsedSeconds - previousHrSample.elapsedSeconds;
-      if (Number.isFinite(deltaSeconds) && deltaSeconds > 0) {
-        const zoneIndex = heartRateZoneIndexForBpm(previousHrSample.heartRate, upperBoundsBpm);
-        zoneSeconds[zoneIndex] += deltaSeconds;
-      }
-    }
-
-    if (Number.isFinite(heartRate) && heartRate > 0) {
-      previousHrSample = { elapsedSeconds, heartRate };
-    }
-  }
-
-  const trackedSeconds = zoneSeconds.reduce((sum, seconds) => sum + seconds, 0);
-  if (trackedSeconds <= 0) {
-    return null;
-  }
-
-  const slices: HeartRateZoneSlice[] = zoneSeconds.map((seconds, zoneIndex) => ({
-    zoneIndex,
-    label: `Z${zoneIndex + 1}`,
-    rangeLabel: heartRateZoneRangeLabel(zoneIndex, upperBoundsBpm),
-    color: HEART_RATE_ZONE_COLORS[zoneIndex],
-    seconds,
-    percent: seconds / trackedSeconds
-  }));
-
-  return { slices, trackedSeconds };
 }
 
 export function buildHeartRateZoneHighlightSegments(

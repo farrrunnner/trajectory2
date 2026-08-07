@@ -86,6 +86,7 @@ export interface ActivitySampleQuery {
   distanceMaxKm?: number;
   maxSamples?: number;
   hidePauses?: boolean;
+  downsample?: boolean;
 }
 
 export interface ActivitySamplesResponse {
@@ -95,13 +96,16 @@ export interface ActivitySamplesResponse {
   returnedSampleCount: number;
 }
 
-export type AerobicDecouplingRangeAxis = 'elapsedTime' | 'movingTime' | 'distance';
+export type ActivityRangeAxis = 'elapsedTime' | 'movingTime' | 'distance';
 
-export interface AerobicDecouplingRange {
-  axis: AerobicDecouplingRangeAxis;
+export interface ActivityRange {
+  axis: ActivityRangeAxis;
   min: number;
   max: number;
 }
+
+export type AerobicDecouplingRangeAxis = ActivityRangeAxis;
+export type AerobicDecouplingRange = ActivityRange;
 
 export interface AerobicDecouplingRequest {
   activityId: number;

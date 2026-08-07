@@ -26,6 +26,9 @@ jobs:
       - name: Run frontend typecheck
         run: npm run typecheck
 
+      - name: Run activity metric tests
+        run: npm run test:activity-metrics
+
   rust-quality:
     strategy:
       fail-fast: false

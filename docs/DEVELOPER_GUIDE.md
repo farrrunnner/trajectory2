@@ -1,6 +1,6 @@
 # Trajectory Developer Guide
 
-> Last verified against the codebase: **June 27, 2026**
+> Last verified against the codebase: **August 7, 2026**
 
 This guide is for contributors working on Trajectory's desktop app codebase.
 It is intentionally practical: what exists today, how it fits together, and how to extend it safely.
@@ -30,6 +30,7 @@ npm run check
 This runs:
 
 - TypeScript typecheck (`npm run typecheck`)
+- activity-detail metric tests (`npm run test:activity-metrics`)
 - Rust check (`cargo check --manifest-path src-tauri/Cargo.toml`)
 
 ### Build local production artifacts
@@ -205,6 +206,8 @@ Current wrappers:
   - fetches summary/track via `getActivity`
   - fetches chart samples via `getActivitySamples`
   - re-queries samples when zoom window, pause visibility, or `chartMaxSamples` changes
+  - loads full-resolution activity records once and derives a memoized `selectedActivity` for summary metrics
+  - recalculates duration, moving/paused time, heart-rate statistics, and heart-rate zones from the current drag or zoom range
   - GPS activities can switch between distance and time charts; time charts can collapse explicit paused segments into moving time
 - **Heatmap:** map rendering with date/category/sport filters.
   - Routes renders the GPS-track overlay.
@@ -304,6 +307,7 @@ Sampling notes:
 
 - `get_activity` returns summary + track (no samples)
 - `get_activity_samples` returns filtered/downsampled sample windows
+- Activity Detail can opt out of sample downsampling for its in-memory metric dataset; chart rendering remains capped separately
 - default chart sample cap is `2000`, clamped in Rust (`50..=20000`)
 - settings validation in `main.rs` accepts `100..=20000`
 
@@ -386,6 +390,7 @@ Design choices:
 - frontend quality job on Ubuntu:
   - `npm ci`
   - `npm run typecheck`
+  - `npm run test:activity-metrics`
 - rust quality job on Ubuntu, macOS, and Windows:
   - Linux runner installs Tauri system dependencies (`libwebkit2gtk-4.1-dev`, `libappindicator3-dev`, `librsvg2-dev`, `patchelf`)
   - `cargo check --manifest-path src-tauri/Cargo.toml`

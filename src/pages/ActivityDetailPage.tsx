@@ -42,6 +42,11 @@ import {
   usePlotDragZoom
 } from '@/lib/charts/plottingEngine';
 import {
+  deriveSelectedActivity,
+  normalizeHeartRateZoneUpperBounds,
+  type HeartRateZoneSlice
+} from '@/lib/activityDetail/activityMetrics';
+import {
   CHART_LINE_COLORS,
   CHART_MIN_ZOOM_SPAN_KM,
   CHART_MIN_ZOOM_SPAN_SECONDS,
@@ -54,12 +59,10 @@ import {
   type ChartZoomDomain,
   type CombinedChartModel,
   type CombinedChartPoint,
-  type HeartRateZoneSlice,
   type RouteHoverCoordinate,
   type SplitMetricKey,
   type ZoneHighlightSegment,
   buildCombinedChartBands,
-  buildHeartRateZoneBreakdown,
   buildHeartRateZoneHighlightSegments,
   defaultChartSeriesVisibility,
   formatDistanceAxisTick,
@@ -70,7 +73,6 @@ import {
   formatPaceTick,
   metricRange,
   metricRangeForVisibleDomain,
-  normalizeHeartRateZoneUpperBounds,
   normalizeToBand,
   removeCombinedChartOutliers,
   readHoveredRouteCoordinate,
@@ -84,6 +86,7 @@ import { MetricCard } from '@/components/MetricCard';
 import { useAppStore } from '@/store/useAppStore';
 import type {
   ActivityDetail,
+  ActivityRange,
   ActivitySample,
   AerobicDecouplingRange,
   AerobicDecouplingResponse,
@@ -991,7 +994,7 @@ export function ActivityDetailPage() {
   const navigate = useNavigate();
   const [detail, setDetail] = useState<ActivityDetail | null>(null);
   const [chartSamples, setChartSamples] = useState<ActivitySample[]>([]);
-  const [heartRateZoneSamples, setHeartRateZoneSamples] = useState<ActivitySample[]>([]);
+  const [activityRecords, setActivityRecords] = useState<ActivitySample[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reducedMapComplexity, setReducedMapComplexity] = useState(false);
@@ -1006,7 +1009,7 @@ export function ActivityDetailPage() {
   );
   const [hoveredHeartRateZoneIndex, setHoveredHeartRateZoneIndex] = useState<number | null>(null);
   const chartSamplesRequestRef = useRef(0);
-  const heartRateZoneSamplesRequestRef = useRef(0);
+  const activityRecordsRequestRef = useRef(0);
   const decouplingRequestRef = useRef(0);
   const routeMapRef = useRef<ActivityRouteMapHandle | null>(null);
   const accentTheme = useAppStore((state) => state.settings?.accentTheme);
@@ -1033,9 +1036,9 @@ export function ActivityDetailPage() {
     }
 
     chartSamplesRequestRef.current += 1;
-    heartRateZoneSamplesRequestRef.current += 1;
+    activityRecordsRequestRef.current += 1;
     setChartSamples([]);
-    setHeartRateZoneSamples([]);
+    setActivityRecords([]);
 
     const load = async () => {
       setLoading(true);
@@ -1231,6 +1234,38 @@ export function ActivityDetailPage() {
   const setChartZoomDomain = chartZoom.setZoomDomain;
   const activeChartXAxisDomain = chartZoomDomain ?? fullChartXAxisDomain;
   const chartSampleDistanceZoomDomain = chartXAxisMode === 'distance' ? chartZoomDomain : null;
+  const metricChartDomain =
+    chartSelectionDomain && chartSelectionDomain[1] - chartSelectionDomain[0] >= minChartZoomSpan
+      ? chartSelectionDomain
+      : chartZoomDomain;
+  const activityMetricSelection = useMemo<ActivityRange | null>(
+    () =>
+      metricChartDomain
+        ? {
+            axis:
+              chartXAxisMode === 'distance'
+                ? 'distance'
+                : shouldHidePausedTime
+                  ? 'movingTime'
+                  : 'elapsedTime',
+            min: metricChartDomain[0],
+            max: metricChartDomain[1]
+          }
+        : null,
+    [chartXAxisMode, metricChartDomain, shouldHidePausedTime]
+  );
+  const selectedActivity = useMemo(
+    () =>
+      detail
+        ? deriveSelectedActivity(
+            detail,
+            activityRecords,
+            activityMetricSelection,
+            heartRateZoneUpperBoundsBpm
+          )
+        : null,
+    [activityMetricSelection, activityRecords, detail, heartRateZoneUpperBoundsBpm]
+  );
 
   useEffect(() => {
     decouplingRequestRef.current += 1;
@@ -1329,38 +1364,28 @@ export function ActivityDetailPage() {
       return;
     }
 
-    const hasHeartRateSummary =
-      detail.summary.avgHr != null || detail.summary.minHr != null || detail.summary.maxHr != null;
-    if (!hasHeartRateSummary) {
-      setHeartRateZoneSamples([]);
-      return;
-    }
+    const requestId = activityRecordsRequestRef.current + 1;
+    activityRecordsRequestRef.current = requestId;
 
-    const requestId = heartRateZoneSamplesRequestRef.current + 1;
-    heartRateZoneSamplesRequestRef.current = requestId;
-
-    const loadZoneSamples = async () => {
+    const loadActivityRecords = async () => {
       try {
-        const response = await getActivitySamples(detail.summary.id, { hidePauses: true });
-        if (heartRateZoneSamplesRequestRef.current !== requestId) {
+        const response = await getActivitySamples(detail.summary.id, { downsample: false });
+        if (activityRecordsRequestRef.current !== requestId) {
           return;
         }
-        setHeartRateZoneSamples(response.samples);
+        setActivityRecords(response.samples);
       } catch (err) {
-        if (heartRateZoneSamplesRequestRef.current !== requestId) {
+        if (activityRecordsRequestRef.current !== requestId) {
           return;
         }
-        console.error('Failed to load heart rate zone samples', err);
+        console.error('Failed to load activity records for metrics', err);
       }
     };
 
-    void loadZoneSamples();
-  }, [detail?.summary.avgHr, detail?.summary.id, detail?.summary.maxHr, detail?.summary.minHr]);
+    void loadActivityRecords();
+  }, [detail?.summary.id]);
 
-  const heartRateZoneBreakdown = useMemo(
-    () => buildHeartRateZoneBreakdown(heartRateZoneSamples, heartRateZoneUpperBoundsBpm),
-    [heartRateZoneSamples, heartRateZoneUpperBoundsBpm]
-  );
+  const heartRateZoneBreakdown = selectedActivity?.metrics.heartRateZones ?? null;
   const heartRateZoneHighlightSegments = useMemo(
     () =>
       buildHeartRateZoneHighlightSegments(
@@ -1477,13 +1502,22 @@ export function ActivityDetailPage() {
   const showDistance = detail.summary.distanceM > 0;
   const showElevationGain = detail.summary.elevationGainM > 0;
   const showAvgSpeedPace = detail.summary.avgSpeedMps != null && detail.summary.avgSpeedMps > 0;
+  const activityMetrics = selectedActivity?.metrics ?? {
+    durationSeconds: detail.summary.durationSeconds,
+    movingDurationSeconds: detail.summary.movingDurationSeconds,
+    pausedDurationSeconds: Math.max(
+      0,
+      detail.summary.durationSeconds - detail.summary.movingDurationSeconds
+    ),
+    avgHr: detail.summary.avgHr,
+    minHr: detail.summary.minHr,
+    maxHr: detail.summary.maxHr,
+    heartRateZones: null
+  };
   const hasAnyHeartRate =
-    detail.summary.avgHr != null || detail.summary.minHr != null || detail.summary.maxHr != null;
-  const pausedDurationSeconds = Math.max(
-    0,
-    detail.summary.durationSeconds - detail.summary.movingDurationSeconds
-  );
-  const showPausedTime = hasPauseSegments && pausedDurationSeconds > 0.5;
+    activityMetrics.avgHr != null || activityMetrics.minHr != null || activityMetrics.maxHr != null;
+  const pauseCount = selectedActivity?.overlappingPauseCount ?? detail.pauseSegments.length;
+  const showPausedTime = pauseCount > 0 && activityMetrics.pausedDurationSeconds > 0.5;
   const chartTitle =
     chartXAxisMode === 'distance'
       ? 'Performance vs Distance'
@@ -1501,19 +1535,19 @@ export function ActivityDetailPage() {
   let heartRateSubLabel: string | undefined;
 
   if (hasAnyHeartRate) {
-    if (detail.summary.avgHr != null) {
-      heartRateValue = `Avg ${Math.round(detail.summary.avgHr)} bpm`;
+    if (activityMetrics.avgHr != null) {
+      heartRateValue = `Avg ${Math.round(activityMetrics.avgHr)} bpm`;
       const heartRateDetails = [
-        detail.summary.minHr != null ? `Min ${Math.round(detail.summary.minHr)} bpm` : null,
-        detail.summary.maxHr != null ? `Max ${Math.round(detail.summary.maxHr)} bpm` : null
+        activityMetrics.minHr != null ? `Min ${Math.round(activityMetrics.minHr)} bpm` : null,
+        activityMetrics.maxHr != null ? `Max ${Math.round(activityMetrics.maxHr)} bpm` : null
       ].filter((part): part is string => part != null);
       heartRateSubLabel = heartRateDetails.length > 0 ? heartRateDetails.join(' · ') : undefined;
-    } else if (detail.summary.minHr != null && detail.summary.maxHr != null) {
-      heartRateValue = `${Math.round(detail.summary.minHr)}-${Math.round(detail.summary.maxHr)} bpm`;
-    } else if (detail.summary.minHr != null) {
-      heartRateValue = `Min ${Math.round(detail.summary.minHr)} bpm`;
-    } else if (detail.summary.maxHr != null) {
-      heartRateValue = `Max ${Math.round(detail.summary.maxHr)} bpm`;
+    } else if (activityMetrics.minHr != null && activityMetrics.maxHr != null) {
+      heartRateValue = `${Math.round(activityMetrics.minHr)}-${Math.round(activityMetrics.maxHr)} bpm`;
+    } else if (activityMetrics.minHr != null) {
+      heartRateValue = `Min ${Math.round(activityMetrics.minHr)} bpm`;
+    } else if (activityMetrics.maxHr != null) {
+      heartRateValue = `Max ${Math.round(activityMetrics.maxHr)} bpm`;
     }
   }
 
@@ -1998,19 +2032,19 @@ export function ActivityDetailPage() {
         <aside className="order-1 xl:order-2">
           <div className="space-y-4 xl:sticky xl:top-4">
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-              <MetricCard label="Duration" value={formatDuration(detail.summary.durationSeconds)} />
+              <MetricCard label="Duration" value={formatDuration(activityMetrics.durationSeconds)} />
               <MetricCard
                 label="Moving Time"
-                value={formatDuration(detail.summary.movingDurationSeconds)}
+                value={formatDuration(activityMetrics.movingDurationSeconds)}
               />
               {showPausedTime ? (
                 <MetricCard
                   label="Paused Time"
-                  value={formatDuration(pausedDurationSeconds)}
+                  value={formatDuration(activityMetrics.pausedDurationSeconds)}
                   subLabel={
-                    detail.pauseSegments.length === 1
+                    pauseCount === 1
                       ? '1 manual pause'
-                      : `${detail.pauseSegments.length} manual pauses`
+                      : `${pauseCount} manual pauses`
                   }
                 />
               ) : null}

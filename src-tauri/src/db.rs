@@ -895,7 +895,6 @@ fn sample_activity_window(
 ) -> (Vec<ActivitySample>, usize) {
     let min_distance_m = query.distance_min_km.map(|value| value.max(0.0) * 1000.0);
     let max_distance_m = query.distance_max_km.map(|value| value.max(0.0) * 1000.0);
-    let max_samples = clamp_chart_max_samples(query.max_samples);
 
     let filtered = if min_distance_m.is_none() && max_distance_m.is_none() {
         all_samples.to_vec()
@@ -924,8 +923,12 @@ fn sample_activity_window(
         query.hide_pauses.unwrap_or(false),
     );
     let matching_sample_count = visible.len();
-    let sampled = downsample_cloned(&visible, max_samples);
-    (sampled, matching_sample_count)
+    let returned = if query.downsample.unwrap_or(true) {
+        downsample_cloned(&visible, clamp_chart_max_samples(query.max_samples))
+    } else {
+        visible
+    };
+    (returned, matching_sample_count)
 }
 
 pub fn get_activity(conn: &Connection, id: i64) -> Result<ActivityDetail> {
@@ -1068,9 +1071,9 @@ pub fn get_activity_samples(
 
 #[cfg(test)]
 mod tests {
-    use crate::models::{ActivitySample, PauseSegment};
+    use crate::models::{ActivitySample, ActivitySampleQuery, ActivitySummary, PauseSegment};
 
-    use super::apply_pause_visibility;
+    use super::{apply_pause_visibility, sample_activity_window};
 
     #[test]
     fn hiding_pauses_compresses_elapsed_time_and_drops_paused_samples() {
@@ -1125,5 +1128,51 @@ mod tests {
         assert_eq!(visible.len(), 2);
         assert_eq!(visible[0].elapsed_seconds, 10.0);
         assert_eq!(visible[1].elapsed_seconds, 13.0);
+    }
+
+    #[test]
+    fn requesting_full_resolution_samples_skips_downsampling() {
+        let samples: Vec<_> = (0..100)
+            .map(|elapsed_seconds| ActivitySample {
+                elapsed_seconds: f64::from(elapsed_seconds),
+                distance_m: Some(f64::from(elapsed_seconds)),
+                speed_mps: Some(1.0),
+                heart_rate: Some(120.0),
+                cadence: None,
+                power_watts: None,
+                altitude_m: None,
+                lat: None,
+                lon: None,
+                timestamp: None,
+            })
+            .collect();
+        let summary = ActivitySummary {
+            id: 1,
+            source_path: "activity.fit".to_string(),
+            activity_start: "2026-08-07T10:00:00Z".to_string(),
+            title: "Test".to_string(),
+            category: "Running".to_string(),
+            sport_type: "Running".to_string(),
+            duration_seconds: 99.0,
+            moving_duration_seconds: 99.0,
+            distance_m: 99.0,
+            elevation_gain_m: 0.0,
+            avg_speed_mps: Some(1.0),
+            max_speed_mps: Some(1.0),
+            avg_hr: Some(120.0),
+            min_hr: Some(120.0),
+            max_hr: Some(120.0),
+            has_gps: false,
+        };
+        let query = ActivitySampleQuery {
+            max_samples: Some(50),
+            downsample: Some(false),
+            ..ActivitySampleQuery::default()
+        };
+
+        let (returned, matching_count) = sample_activity_window(&samples, &summary, &[], &query);
+
+        assert_eq!(matching_count, 100);
+        assert_eq!(returned.len(), 100);
     }
 }

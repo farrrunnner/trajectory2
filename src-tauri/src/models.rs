@@ -126,6 +126,7 @@ pub struct ActivitySampleQuery {
     pub distance_max_km: Option<f64>,
     pub max_samples: Option<usize>,
     pub hide_pauses: Option<bool>,
+    pub downsample: Option<bool>,
 }
 
 impl Default for ActivitySampleQuery {
@@ -135,6 +136,7 @@ impl Default for ActivitySampleQuery {
             distance_max_km: None,
             max_samples: None,
             hide_pauses: None,
+            downsample: None,
         }
     }
 }
