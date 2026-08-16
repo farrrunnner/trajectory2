@@ -19,6 +19,8 @@ No cloud sync, no account, no server. Just you and your training data.
 
 The [original version](https://github.com/ericceg/trajectory) didn't have the heart rate drift metric as discussed by Scott Johnston et al in Training for the Uphill Athlete.
 
+The original version didn't dynamically display the metrics for the selected workout section (always showed entire session).
+
 [Trajectory (Original)](https://github.com/ericceg/trajectory):
 
 There is no single reason for why I built Trajectory, but rather a combination of factors:
