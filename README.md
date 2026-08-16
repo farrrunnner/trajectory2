@@ -21,7 +21,7 @@ The original version didn't have the heart rate drift metric as discussed by Sco
 
 The original version didn't dynamically display the metrics for the selected workout section (always showed entire session).
 
-[Trajectory (Original)](https://github.com/ericceg/trajectory):
+[Trajectory (Original App)](https://github.com/ericceg/trajectory):
 
 There is no single reason for why I built Trajectory, but rather a combination of factors:
 
