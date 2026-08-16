@@ -17,7 +17,7 @@ No cloud sync, no account, no server. Just you and your training data.
 
 [Trajectory2](https://github.com/farrrunnner/trajectory2):
 
-The [original version](https://github.com/ericceg/trajectory) didn't have the heart rate drift aerobic decoupling metric as discussed by Scott Johnston et al in Training for the Uphill Athlete.
+The [original version](https://github.com/ericceg/trajectory) didn't have the heart rate drift metric as discussed by Scott Johnston et al in Training for the Uphill Athlete.
 
 [Trajectory (Original)](https://github.com/ericceg/trajectory):
 
