@@ -5,7 +5,7 @@
 [![Framework](https://img.shields.io/badge/framework-Tauri%20v2-yellow)](https://tauri.app/)
 [![Backend](https://img.shields.io/badge/backend-Rust-orange)](https://www.rust-lang.org/)
 [![Frontend](https://img.shields.io/badge/frontend-React%20%2B%20TypeScript-3178c6)](https://reactjs.org/)
-[![Version](https://img.shields.io/badge/version-v0.1.5-green)](https://github.com/ericceg/trajectory/releases/latest)
+[![Version](https://img.shields.io/badge/version-v2-green)](https://github.com/farrrunnner/trajectory2)
 
 
 **Powerful local-first workout analyzer that keeps your data private.**
@@ -14,6 +14,12 @@ No cloud sync, no account, no server. Just you and your training data.
 
 
 ## Why I Built This
+
+[Trajectory2](https://github.com/farrrunnner/trajectory2):
+
+The [original version](https://github.com/ericceg/trajectory) didn't have the heart rate drift aerobic decoupling metric as discussed by Scott Johnston et al in Training for the Uphill Athlete.
+
+[Trajectory (Original)](https://github.com/ericceg/trajectory):
 
 There is no single reason for why I built Trajectory, but rather a combination of factors:
 
@@ -26,8 +32,8 @@ There is no single reason for why I built Trajectory, but rather a combination o
 
 ## Installation
 
-1. Open the [latest release](https://github.com/ericceg/trajectory/releases/latest).
-2. Download the `.dmg` for macOS, `.exe` or `.msi` for Windows, or `.deb` or `.AppImage` for Linux.
+1. Open the [latest release](https://github.com/farrrunnner/trajectory2).
+2. [Download the `.dmg` for macOS HERE](https://github.com/farrrunnner/trajectory2/blob/main/Trajectory2.dmg) by clicking the 'Download raw file' button or the 'View raw' button. Or use GitHub Actions to build `.exe` or `.msi` for Windows, or `.deb` or `.AppImage` for Linux.
 3. Install and launch the app.
 
 Current builds support Apple Silicon on macOS and 64-bit systems on Windows and Linux.
