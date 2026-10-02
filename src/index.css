@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-bg: 246 248 251;
+  --color-panel: 255 255 255;
+  --color-muted: 93 102 116;
+  --color-accent: 252 76 2;
+  --color-accent-soft: 255 140 66;
+  --color-accent-tint: 255 204 170;
+  --color-border: 220 226 234;
+  --color-foreground: 23 32 45;
+  --app-glow-light-a: rgba(252, 76, 2, 0.08);
+  --app-glow-light-b: rgba(252, 76, 2, 0.04);
+  --app-glow-dark-a: rgba(252, 76, 2, 0.14);
+  --app-glow-dark-b: rgba(252, 76, 2, 0.08);
+  --app-glow-a: var(--app-glow-light-a);
+  --app-glow-b: var(--app-glow-light-b);
+  --app-bg-solid: #f6f8fb;
+  font-family: 'Avenir Next', 'Montserrat', 'Segoe UI', sans-serif;
+}
+
+:root[data-theme='dark'] {
+  --color-bg: 14 16 18;
+  --color-panel: 23 26 31;
+  --color-muted: 158 164 174;
+  --color-accent: 252 76 2;
+  --color-accent-soft: 255 140 66;
+  --color-accent-tint: 255 204 170;
+  --color-border: 38 43 51;
+  --color-foreground: 248 250 252;
+  --app-glow-a: var(--app-glow-dark-a);
+  --app-glow-b: var(--app-glow-dark-b);
+  --app-bg-solid: #0e1012;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: rgb(var(--color-foreground));
+  background:
+    radial-gradient(circle at 10% 20%, var(--app-glow-a), transparent 40%),
+    radial-gradient(circle at 80% 0%, var(--app-glow-b), transparent 45%),
+    var(--app-bg-solid);
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.maplibregl-map {
+  background: rgb(var(--color-bg));
+}
+
+.maplibregl-ctrl-group {
+  border: 1px solid rgba(var(--color-border), 0.8);
+}
+
+.maplibregl-ctrl button.maplibregl-ctrl-zoom-in,
+.maplibregl-ctrl button.maplibregl-ctrl-zoom-out,
+.maplibregl-ctrl button.maplibregl-ctrl-compass {
+  background-color: rgba(var(--color-panel), 0.9);
+}
+
+.country-activity-popup .maplibregl-popup-content {
+  padding: 0.7rem 0.8rem;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 0.6rem;
+  color: #fff;
+  background: #111827;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+
+.country-activity-popup .maplibregl-popup-tip {
+  display: none;
+}
+
+.country-map-popup {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 10rem;
+  line-height: 1.3;
+}
+
+.country-map-popup strong {
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.country-map-popup span {
+  color: #d1d5db;
+  font-size: 0.8rem;
+}
+
+/* Keep chart drag interactions from selecting axis/tooltip text. */
+.recharts-responsive-container,
+.recharts-responsive-container * {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+@keyframes calendar-pop-a {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  45% {
+    transform: translateY(-2px) scale(1.05);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes calendar-pop-b {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  45% {
+    transform: translateY(-2px) scale(1.05);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+.calendar-pop-a {
+  animation: calendar-pop-a 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.calendar-pop-b {
+  animation: calendar-pop-b 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.calendar-hover-popover {
+  min-width: 170px;
+  border-radius: 0.65rem;
+  border: 1px solid rgba(var(--color-accent), 0.35);
+  background: rgba(var(--color-panel), 0.96);
+  padding: 0.45rem 0.55rem;
+  backdrop-filter: blur(8px);
+}

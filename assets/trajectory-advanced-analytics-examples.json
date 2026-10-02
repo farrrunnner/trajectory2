@@ -1,0 +1,319 @@
+{
+  "format": "trajectory-advanced-analytics",
+  "schemaVersion": 1,
+  "exportedAt": "2000-01-01T00:00:00Z",
+  "summary": {
+    "metrics": 7,
+    "streaks": 3,
+    "charts": 3
+  },
+  "data": {
+    "metrics": [
+      {
+        "id": "example_metric_1",
+        "name": "pull",
+        "kind": "base",
+        "showInView": false,
+        "timeRange": {
+          "preset": "all",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "base": {
+          "measure": "activitiesCount",
+          "activityConditions": [],
+          "sampleConditions": [],
+          "activityConditionGroups": [
+            {
+              "id": "example_ag_1",
+              "conditions": [
+                {
+                  "id": "example_ac_1",
+                  "field": "title",
+                  "operator": "contains",
+                  "value": "pull"
+                }
+              ]
+            }
+          ],
+          "sampleConditionGroups": [],
+          "activityConditionJoin": "and",
+          "sampleConditionJoin": "and",
+          "minimumSampleMatchSeconds": 0,
+          "defaultChartGranularity": "day",
+          "displayUnit": "auto"
+        }
+      },
+      {
+        "id": "example_metric_2",
+        "name": "push",
+        "kind": "base",
+        "showInView": false,
+        "timeRange": {
+          "preset": "all",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "base": {
+          "measure": "activitiesCount",
+          "activityConditions": [],
+          "sampleConditions": [],
+          "activityConditionGroups": [
+            {
+              "id": "example_ag_2",
+              "conditions": [
+                {
+                  "id": "example_ac_2",
+                  "field": "title",
+                  "operator": "contains",
+                  "value": "push"
+                }
+              ]
+            }
+          ],
+          "sampleConditionGroups": [],
+          "activityConditionJoin": "and",
+          "sampleConditionJoin": "and",
+          "minimumSampleMatchSeconds": 0,
+          "defaultChartGranularity": "week",
+          "displayUnit": "auto"
+        }
+      },
+      {
+        "id": "example_metric_3",
+        "name": "aerobic time",
+        "kind": "base",
+        "showInView": true,
+        "timeRange": {
+          "preset": "thisWeek",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "base": {
+          "measure": "sampleTime",
+          "activityConditions": [],
+          "sampleConditions": [],
+          "activityConditionGroups": [],
+          "sampleConditionGroups": [
+            {
+              "id": "example_sg_1",
+              "conditions": [
+                {
+                  "id": "example_sc_1",
+                  "field": "heartRateZone",
+                  "operator": "is",
+                  "zone": 2
+                }
+              ]
+            },
+            {
+              "id": "example_sg_2",
+              "conditions": [
+                {
+                  "id": "example_sc_2",
+                  "field": "heartRateZone",
+                  "operator": "is",
+                  "zone": 3
+                }
+              ]
+            }
+          ],
+          "activityConditionJoin": "and",
+          "sampleConditionJoin": "and",
+          "minimumSampleMatchSeconds": 300,
+          "defaultChartGranularity": "day",
+          "displayUnit": ""
+        }
+      },
+      {
+        "id": "example_metric_4",
+        "name": "time",
+        "kind": "base",
+        "showInView": false,
+        "timeRange": {
+          "preset": "all",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "base": {
+          "measure": "durationSum",
+          "activityConditions": [],
+          "sampleConditions": [],
+          "activityConditionGroups": [],
+          "sampleConditionGroups": [],
+          "activityConditionJoin": "and",
+          "sampleConditionJoin": "and",
+          "minimumSampleMatchSeconds": 0,
+          "defaultChartGranularity": "day",
+          "displayUnit": "auto"
+        }
+      },
+      {
+        "id": "example_metric_5",
+        "name": "aerobic time fraction",
+        "kind": "formula",
+        "showInView": true,
+        "timeRange": {
+          "preset": "thisWeek",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "formula": {
+          "leftMetricId": "example_metric_3",
+          "operator": "divide",
+          "rightMetricId": "example_metric_4",
+          "displayUnit": "%"
+        }
+      },
+      {
+        "id": "example_metric_6",
+        "name": "active day",
+        "kind": "base",
+        "showInView": false,
+        "timeRange": {
+          "preset": "all",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "base": {
+          "measure": "activitiesCount",
+          "activityConditions": [],
+          "sampleConditions": [],
+          "activityConditionGroups": [],
+          "sampleConditionGroups": [],
+          "activityConditionJoin": "and",
+          "sampleConditionJoin": "and",
+          "minimumSampleMatchSeconds": 0,
+          "defaultChartGranularity": "day",
+          "displayUnit": "auto"
+        }
+      },
+      {
+        "id": "example_metric_7",
+        "name": "risky ride",
+        "kind": "base",
+        "showInView": true,
+        "timeRange": {
+          "preset": "all",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "base": {
+          "measure": "sampleTime",
+          "activityConditions": [],
+          "sampleConditions": [],
+          "activityConditionGroups": [],
+          "sampleConditionGroups": [
+            {
+              "id": "example_sg_3",
+              "conditions": [
+                {
+                  "id": "example_sc_3",
+                  "field": "speedMps",
+                  "operator": "greaterThanOrEqual",
+                  "numberValue": 13.88888888888889
+                }
+              ]
+            }
+          ],
+          "activityConditionJoin": "and",
+          "sampleConditionJoin": "and",
+          "minimumSampleMatchSeconds": 0,
+          "defaultChartGranularity": "week",
+          "displayUnit": "auto"
+        }
+      }
+    ],
+    "streaks": [
+      {
+        "id": "example_streak_1",
+        "name": "weekly pull/push streak",
+        "timeRange": {
+          "preset": "all",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "metricId": "example_metric_1",
+        "additionalMetricIds": [
+          "example_metric_2"
+        ],
+        "period": "week",
+        "thresholdOperator": "greaterThanOrEqual",
+        "thresholdValue": 1
+      },
+      {
+        "id": "example_streak_2",
+        "name": "weekly aerobic time streak",
+        "timeRange": {
+          "preset": "90d",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "metricId": "example_metric_3",
+        "additionalMetricIds": [],
+        "period": "week",
+        "thresholdOperator": "greaterThanOrEqual",
+        "thresholdValue": 1800
+      },
+      {
+        "id": "example_streak_3",
+        "name": "weekly activity streak",
+        "timeRange": {
+          "preset": "all",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "metricId": "example_metric_6",
+        "additionalMetricIds": [],
+        "period": "week",
+        "thresholdOperator": "greaterThanOrEqual",
+        "thresholdValue": 1
+      }
+    ],
+    "charts": [
+      {
+        "id": "example_chart_1",
+        "name": "aerobic time fraction",
+        "timeRange": {
+          "preset": "365d",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "chartType": "line",
+        "metricIds": [
+          "example_metric_5"
+        ],
+        "granularity": "week"
+      },
+      {
+        "id": "example_chart_2",
+        "name": "aerobic time",
+        "timeRange": {
+          "preset": "365d",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "chartType": "bar",
+        "metricIds": [
+          "example_metric_3"
+        ],
+        "granularity": "week"
+      },
+      {
+        "id": "example_chart_3",
+        "name": "push vs. pull days",
+        "timeRange": {
+          "preset": "all",
+          "customStartDate": "2000-01-01",
+          "customEndDate": "2000-01-31"
+        },
+        "chartType": "stackedBar",
+        "metricIds": [
+          "example_metric_2",
+          "example_metric_1"
+        ],
+        "granularity": "month"
+      }
+    ]
+  }
+}

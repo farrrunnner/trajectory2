@@ -1,0 +1,149 @@
+name: Preview Bundles
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version label to validate against package metadata
+        required: false
+        type: string
+      include-macos:
+        description: Also build macOS bundles for Apple Silicon and Intel
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  build-preview:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            os: linux
+            artifact_name: trajectory2-linux-x64-bundles
+            artifact_paths: |
+              src-tauri/target/release/bundle/deb/*.deb
+              src-tauri/target/release/bundle/appimage/*.AppImage
+          - platform: windows-2022
+            os: windows
+            artifact_name: trajectory2-windows-x64-bundles
+            artifact_paths: |
+              src-tauri/target/release/bundle/nsis/*.exe
+              src-tauri/target/release/bundle/msi/*.msi
+
+    runs-on: ${{ matrix.platform }}
+    env:
+      # Lets AppImage packaging tools run without a FUSE mount on the Linux runner.
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system deps
+        if: matrix.os == 'linux'
+        run: bash scripts/install-tauri-linux-deps.sh
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Setup Rust (stable + rustfmt)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Verify version alignment
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+        run: npm run check:versions
+
+      - name: Run quality checks
+        run: npm run check
+
+      - name: Build desktop bundles
+        run: npm run tauri -- build --ci -- --locked
+
+      - name: Upload preview artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.artifact_paths }}
+          if-no-files-found: error
+          retention-days: 14
+
+  build-preview-macos:
+    if: ${{ inputs.include-macos }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-15
+            arch: aarch64
+          - platform: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Setup Rust (stable + rustfmt)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Verify version alignment
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+        run: npm run check:versions
+
+      - name: Run quality checks
+        run: npm run check
+
+      - name: Build desktop bundles
+        run: npm run tauri -- build --ci -- --locked
+
+      - name: Verify macOS app signature
+        run: codesign --verify --deep --strict src-tauri/target/release/bundle/macos/*.app
+
+      - name: Archive app preserving permissions and symlinks
+        run: tar -czf src-tauri/target/release/bundle/macos/Trajectory.app.tar.gz -C src-tauri/target/release/bundle/macos Trajectory.app
+
+      - name: Upload preview artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: trajectory2-macos-${{ matrix.arch }}-bundles
+          path: |
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          retention-days: 14

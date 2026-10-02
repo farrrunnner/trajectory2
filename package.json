@@ -1,0 +1,52 @@
+{
+  "name": "trajectory",
+  "private": true,
+  "version": "0.1.5",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "test:activity-metrics": "node --test scripts/activityMetrics.test.mjs",
+    "check:versions": "node scripts/verify-version-alignment.mjs",
+    "check:rust": "cargo check --locked --manifest-path src-tauri/Cargo.toml",
+    "check:rust-format": "cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check",
+    "check": "npm run check:versions && npm run typecheck && npm run test:activity-metrics && npm run check:rust && npm run test:rust && npm run check:rust-format",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test:rust": "cargo test --locked --manifest-path src-tauri/Cargo.toml"
+  },
+  "dependencies": {
+    "@tanstack/react-table": "^8.21.2",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "date-fns": "^3.6.0",
+    "maplibre-gl": "^5.18.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.30.0",
+    "recharts": "^2.15.4",
+    "topojson-client": "^3.1.0",
+    "world-atlas": "^2.0.2",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/geojson": "^7946.0.16",
+    "@types/node": "^22.13.10",
+    "@types/react": "^18.3.20",
+    "@types/react-dom": "^18.3.6",
+    "@types/topojson-client": "^3.1.5",
+    "@types/topojson-specification": "^1.0.5",
+    "@vitejs/plugin-react": "^4.4.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.3",
+    "react-test-renderer": "18.3.1",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.8.2",
+    "vite": "^7.3.1"
+  }
+}
