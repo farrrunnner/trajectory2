@@ -217,7 +217,7 @@ There is no single reason for why I built Trajectory, but rather a combination o
 
 
 
-## Installation (IMPORTANT: THE INSTRUCTIONS HERE ARE ONLY FOR THE ORIGINAL VERSION (WITHOUT HR DRIFT). YOU WILL NEED TO DOWNLOAD AND COMPILE TRAJECTORY2 YOURSELF.)
+## Installation (IMPORTANT: THE INSTRUCTIONS BELOW ARE ONLY FOR THE ORIGINAL VERSION (WITHOUT HR DRIFT). YOU WILL NEED TO DOWNLOAD AND COMPILE TRAJECTORY2 YOURSELF.)
 
 1. Open the original project's [latest release](https://github.com/ericceg/trajectory/releases/latest). For the source in this repository, follow [Developer Setup](#developer-setup-build-from-source).
 2. Download the `.dmg` for macOS, `.exe` or `.msi` for Windows, or `.deb` or `.AppImage` for Linux.
