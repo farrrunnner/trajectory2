@@ -9,6 +9,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, 'src')
     }
   },
+  build: {
+    // macOS 12 ships WebKit/Safari 15; Vite 7's default target starts at Safari 16.
+    target: ['es2020', 'safari15']
+  },
   clearScreen: false,
   server: {
     host: '127.0.0.1',

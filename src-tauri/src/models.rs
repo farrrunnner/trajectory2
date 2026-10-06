@@ -174,11 +174,24 @@ pub struct AerobicDecouplingRequest {
     pub range: Option<AerobicDecouplingRange>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AerobicDecouplingUnavailableReason {
+    InsufficientSamples,
+    InsufficientDuration,
+    InsufficientHeartRate,
+    InsufficientSpeed,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AerobicDecouplingResponse {
     pub pace_hr_decoupling_pct: Option<f64>,
     pub heart_rate_drift_pct: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pace_hr_decoupling_unavailable_reason: Option<AerobicDecouplingUnavailableReason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub heart_rate_drift_unavailable_reason: Option<AerobicDecouplingUnavailableReason>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

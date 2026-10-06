@@ -104,7 +104,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   updateHeartRateZoneUpperBoundsBpm: async (upperBoundsBpm) => {
     const settings = await setHeartRateZoneUpperBoundsBpm(upperBoundsBpm);
-    set({ settings });
+    set({ settings, advancedAnalyticsCache: {} });
   },
   runScan: async (fullRescan = false) => {
     set({ scanning: true, scanDone: null });

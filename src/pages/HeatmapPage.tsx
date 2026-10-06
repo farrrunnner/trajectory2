@@ -383,6 +383,7 @@ function HeatmapMapOverlayControls({
 }
 
 export function HeatmapPage() {
+  const dataVersion = useAppStore((state) => `${state.settings?.importFolderPath ?? ''}:${state.settings?.lastScanTimestamp ?? ''}`);
   const heatmapFullOpacity = useAppStore((state) => state.settings?.heatmapFullOpacity ?? false);
   const accentTheme = useAppStore((state) => state.settings?.accentTheme);
   const timeSpan = useUiStateStore((state) => state.heatmapTimeSpan) as TimeSpan;
@@ -452,7 +453,7 @@ export function HeatmapPage() {
     return () => {
       cancelled = true;
     };
-  }, [activityQuery]);
+  }, [activityQuery, dataVersion]);
 
   const sportOptions = useMemo(
     () =>
@@ -512,7 +513,7 @@ export function HeatmapPage() {
     return () => {
       cancelled = true;
     };
-  }, [heatmapFilters, viewMode]);
+  }, [heatmapFilters, viewMode, dataVersion]);
 
   useEffect(() => {
     if (!countryViewEnabled) {
@@ -547,7 +548,7 @@ export function HeatmapPage() {
     return () => {
       cancelled = true;
     };
-  }, [countryViewEnabled, heatmapFilters]);
+  }, [countryViewEnabled, heatmapFilters, dataVersion]);
 
   const trackCount = heatmapData?.tracks.length ?? 0;
   const heatStyle = useMemo(

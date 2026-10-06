@@ -1149,7 +1149,7 @@ mod tests {
         let summary = ActivitySummary {
             id: 1,
             source_path: "activity.fit".to_string(),
-            activity_start: "2026-08-07T10:00:00Z".to_string(),
+            activity_start: "2000-01-01T10:00:00Z".to_string(),
             title: "Test".to_string(),
             category: "Running".to_string(),
             sport_type: "Running".to_string(),

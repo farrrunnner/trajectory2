@@ -17,13 +17,9 @@ import {
 import type { FeatureCollection, LineString, Point } from 'geojson';
 import maplibregl, { type GeoJSONSource } from 'maplibre-gl';
 
-import { getActivity, getActivitySamples, getAerobicDecoupling } from '@/lib/tauri';
 import {
   formatDateTime,
-  formatDistanceKm,
-  formatDuration,
-  formatPaceMinKm,
-  formatSpeedKmh
+  formatDuration
 } from '@/lib/format';
 import {
   CHART_IS_ANIMATION_ACTIVE,
@@ -42,14 +38,13 @@ import {
   usePlotDragZoom
 } from '@/lib/charts/plottingEngine';
 import {
+  activityMetricLabel,
   deriveSelectedActivity,
   normalizeHeartRateZoneUpperBounds,
   type HeartRateZoneSlice
 } from '@/lib/activityDetail/activityMetrics';
 import {
   CHART_LINE_COLORS,
-  CHART_MIN_ZOOM_SPAN_KM,
-  CHART_MIN_ZOOM_SPAN_SECONDS,
   COMBINED_CHART_DOMAIN,
   COMBINED_CHART_SERIES_ORDER,
   type ChartMode,
@@ -82,14 +77,15 @@ import { US_DEFAULT_CENTER, US_DEFAULT_ZOOM } from '@/lib/mapStyles';
 import { getAccentThemePalette } from '@/lib/theme';
 import { useManagedMapLibre } from '@/lib/useManagedMapLibre';
 import { MaximizableMapFrame } from '@/components/MaximizableMapFrame';
-import { MetricCard } from '@/components/MetricCard';
+import { ActivityMetricsPanel } from '@/components/activityDetail/ActivityMetricsPanel';
+import { activityAxisDomain, activityChartSamples, hasDistanceData, RANGE_EPSILON, resolveActivityRange } from '@/lib/activityDetail/activityData';
+import { useActivityData } from '@/lib/activityDetail/useActivityData';
+import { useActivityDecoupling } from '@/lib/activityDetail/useActivityDecoupling';
 import { useAppStore } from '@/store/useAppStore';
 import type {
-  ActivityDetail,
   ActivityRange,
-  ActivitySample,
-  AerobicDecouplingRange,
-  AerobicDecouplingResponse,
+  AerobicDecouplingRequest,
+  AerobicDecouplingUnavailableReason,
   TrackPoint
 } from '@/types';
 
@@ -99,10 +95,6 @@ const ACTIVITY_ROUTE_HOVER_SOURCE_ID = 'activity-route-hover-source';
 const ACTIVITY_ROUTE_HOVER_OUTER_LAYER_ID = 'activity-route-hover-outer-layer';
 const ACTIVITY_ROUTE_HOVER_INNER_LAYER_ID = 'activity-route-hover-inner-layer';
 const ROUTE_HOVER_MARKER_SMOOTHING_MS = 10;
-const EMPTY_DECOUPLING_RESULT: AerobicDecouplingResponse = {
-  paceHrDecouplingPct: null,
-  heartRateDriftPct: null
-};
 type ActivityRouteMapHandle = {
   setHoverTarget: (coordinate: RouteHoverCoordinate) => void;
   clearHoverTarget: () => void;
@@ -492,7 +484,7 @@ function SplitMetricChart({
                   fillOpacity={0.18}
                   strokeWidth={1.5}
                   dot={false}
-                  connectNulls
+                  connectNulls={false}
                   activeDot={CHART_LINE_ACTIVE_DOT}
                   isAnimationActive={CHART_IS_ANIMATION_ACTIVE}
                 />
@@ -503,7 +495,7 @@ function SplitMetricChart({
                   stroke={color}
                   strokeWidth={2}
                   dot={false}
-                  connectNulls
+                  connectNulls={false}
                   activeDot={CHART_LINE_ACTIVE_DOT}
                   isAnimationActive={CHART_IS_ANIMATION_ACTIVE}
                 />
@@ -518,11 +510,13 @@ function SplitMetricChart({
 
 function HeartRateZonesCard({
   slices,
+  isSegment,
   trackedSeconds,
   hoveredZoneIndex,
   onHoverZoneChange
 }: {
   slices: HeartRateZoneSlice[];
+  isSegment: boolean;
   trackedSeconds: number;
   hoveredZoneIndex: number | null;
   onHoverZoneChange: (zoneIndex: number | null) => void;
@@ -533,13 +527,13 @@ function HeartRateZonesCard({
     <section className="rounded-xl border border-border bg-panel p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-semibold text-foreground">Heart Rate Zones</h3>
+          <h3 className="text-lg font-semibold text-foreground">{activityMetricLabel('Heart Rate Zones', isSegment)}</h3>
           <p className="mt-1 text-xs text-muted">
             Time in zone based on recorded heart-rate sample intervals, excluding paused time.
           </p>
         </div>
         <p className="text-sm text-muted">
-          Tracked HR time: <span className="font-semibold text-foreground">{formatDuration(trackedSeconds)}</span>
+          {activityMetricLabel('Tracked HR time', isSegment)}: <span className="font-semibold text-foreground">{formatDuration(trackedSeconds)}</span>
         </p>
       </div>
 
@@ -990,90 +984,100 @@ function ReducedComplexityMapToggle({
 
 export function ActivityDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const settings = useAppStore((state) => state.settings);
+  const dataVersion = `${settings?.importFolderPath ?? ''}:${settings?.lastScanTimestamp ?? ''}`;
+  return <ActivityDetailContent key={`${id}:${dataVersion}`} activityId={Number(id)} dataVersion={dataVersion} />;
+}
+
+function decouplingUnavailableMessage(reason: AerobicDecouplingUnavailableReason | undefined): string {
+  switch (reason) {
+    case 'insufficientDuration': return 'Requires at least 1 minute of active time.';
+    case 'insufficientHeartRate': return 'Requires recorded heart rate for at least 80% of each half.';
+    case 'insufficientSpeed': return 'Requires paired speed and heart-rate data for at least 80% of each half.';
+    case 'insufficientSamples': return 'Not enough recorded samples.';
+    default: return 'Not enough suitable data in this range.';
+  }
+}
+
+function ActivityDetailContent({ activityId, dataVersion }: { activityId: number; dataVersion: string }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [detail, setDetail] = useState<ActivityDetail | null>(null);
-  const [chartSamples, setChartSamples] = useState<ActivitySample[]>([]);
-  const [activityRecords, setActivityRecords] = useState<ActivitySample[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { detail, records: activityRecords, loading, error } = useActivityData(activityId, dataVersion);
   const [reducedMapComplexity, setReducedMapComplexity] = useState(false);
   const [chartMode, setChartMode] = useState<ChartMode>('combined');
-  const [selectedChartXAxisMode, setSelectedChartXAxisMode] = useState<ChartXAxisMode>('time');
-  const [hidePausedTime, setHidePausedTime] = useState(false);
-  const [chartSeriesVisibility, setChartSeriesVisibility] = useState<ChartSeriesVisibility>(() =>
-    defaultChartSeriesVisibility()
-  );
-  const [decouplingResult, setDecouplingResult] = useState<AerobicDecouplingResponse>(
-    EMPTY_DECOUPLING_RESULT
-  );
+  const [selectedChartXAxisMode, setSelectedChartXAxisMode] = useState<ChartXAxisMode | null>(null);
+  const [hidePausedTime, setHidePausedTime] = useState<boolean | null>(null);
+  const [chartSeriesVisibility, setChartSeriesVisibility] = useState<ChartSeriesVisibility>(() => defaultChartSeriesVisibility());
   const [hoveredHeartRateZoneIndex, setHoveredHeartRateZoneIndex] = useState<number | null>(null);
-  const chartSamplesRequestRef = useRef(0);
-  const activityRecordsRequestRef = useRef(0);
-  const decouplingRequestRef = useRef(0);
   const routeMapRef = useRef<ActivityRouteMapHandle | null>(null);
   const accentTheme = useAppStore((state) => state.settings?.accentTheme);
   const chartMaxSamples = useAppStore((state) => state.settings?.chartMaxSamples ?? 2000);
   const chartOutlierRemoval = useAppStore((state) => state.settings?.chartOutlierRemoval ?? true);
-  const heartRateZoneUpperBoundsBpm = useAppStore((state) =>
-    normalizeHeartRateZoneUpperBounds(state.settings?.heartRateZoneUpperBoundsBpm)
-  );
+  const rawHeartRateBounds = useAppStore((state) => state.settings?.heartRateZoneUpperBoundsBpm);
+  const heartRateZoneUpperBoundsBpm = useMemo(() => normalizeHeartRateZoneUpperBounds(rawHeartRateBounds), [rawHeartRateBounds]);
   const accentPalette = useMemo(() => getAccentThemePalette(accentTheme), [accentTheme]);
   const hasGpsTrack = Boolean(detail?.summary.hasGps && detail.track.length > 0);
-  const chartXAxisMode: ChartXAxisMode = hasGpsTrack ? selectedChartXAxisMode : 'time';
-  const shouldHidePausedTime = chartXAxisMode === 'time' && hidePausedTime;
-  const hasPauseSegments = Boolean(detail && detail.pauseSegments.length > 0);
-  const isFitRunningActivity = Boolean(
-    detail &&
-      detail.summary.sourcePath.toLowerCase().endsWith('.fit') &&
-      detail.summary.category.toLowerCase() === 'running' &&
-      (detail.summary.avgHr != null || detail.summary.minHr != null || detail.summary.maxHr != null)
-  );
+  const hasDistanceAxis = useMemo(() => hasDistanceData(activityRecords), [activityRecords]);
+  const chartXAxisMode: ChartXAxisMode = hasDistanceAxis ? selectedChartXAxisMode ?? 'distance' : 'time';
+  const shouldHidePausedTime = chartXAxisMode === 'time' && (hidePausedTime ?? !hasGpsTrack);
+  const rangeAxis: ActivityRange['axis'] = chartXAxisMode === 'distance' ? 'distance' : shouldHidePausedTime ? 'movingTime' : 'elapsedTime';
+  const hasPauseSegments = Boolean(detail?.pauseSegments.length);
+  const showDecoupling = Boolean(detail && (detail.summary.avgHr != null || activityRecords.some((record) => record.heartRate != null) || detail.summary.category === 'Running'));
 
   useEffect(() => {
-    if (!id) {
-      return;
-    }
-
-    chartSamplesRequestRef.current += 1;
-    activityRecordsRequestRef.current += 1;
-    setChartSamples([]);
-    setActivityRecords([]);
-
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const result = await getActivity(Number(id));
-        setDetail(result);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    void load();
-  }, [id]);
-
-  useEffect(() => {
-    if (!detail) {
-      return;
-    }
-
-    setChartSeriesVisibility(defaultChartSeriesVisibility(detail.summary.sportType));
+    setChartSeriesVisibility(defaultChartSeriesVisibility(detail?.summary.sportType));
     routeMapRef.current?.clearHoverTarget();
-  }, [detail?.summary.id, detail?.summary.sportType]);
+  }, [detail?.summary.sportType]);
 
-  useEffect(() => {
-    if (!detail) {
-      return;
-    }
-
-    setSelectedChartXAxisMode(detail.summary.hasGps && detail.track.length > 0 ? 'distance' : 'time');
-    setHidePausedTime(!detail.summary.hasGps);
-    setDecouplingResult(EMPTY_DECOUPLING_RESULT);
-  }, [detail]);
+  const fullChartXAxisDomain = useMemo<ChartZoomDomain>(() => {
+    const domain = detail ? activityAxisDomain(detail, activityRecords, rangeAxis) : [0, 1];
+    return [domain[0], Math.max(domain[0] + RANGE_EPSILON, domain[1])];
+  }, [activityRecords, detail, rangeAxis]);
+  const chartZoom = usePlotDragZoom<number>({
+    parseLabel: parseNumberChartLabel,
+    compareValues: (left, right) => left - right,
+    normalizeDomain: (anchor, current) => {
+      const min = Math.max(fullChartXAxisDomain[0], Math.min(anchor, current));
+      const max = Math.min(fullChartXAxisDomain[1], Math.max(anchor, current));
+      return Number.isFinite(min) && Number.isFinite(max) && max - min > RANGE_EPSILON ? [min, max] : null;
+    },
+    areValuesEqual: (left, right) => Math.abs(left - right) < RANGE_EPSILON,
+    areDomainsEqual: (left, right) => areDomainsEqual(left, right, (a, b) => Math.abs(a - b) < RANGE_EPSILON),
+    onPointerMove: (event) => routeMapRef.current?.setHoverTarget(readHoveredRouteCoordinate(event))
+  });
+  const chartZoomDomain = chartZoom.zoomDomain;
+  const chartSelectionDomain = chartZoom.selectionDomain;
+  const activeChartXAxisDomain = chartZoomDomain ?? fullChartXAxisDomain;
+  const metricChartDomain = chartSelectionDomain && chartSelectionDomain[1] - chartSelectionDomain[0] > RANGE_EPSILON
+    ? chartSelectionDomain : chartZoomDomain;
+  const activityMetricSelection = useMemo<ActivityRange | null>(() => metricChartDomain
+    ? { axis: rangeAxis, min: metricChartDomain[0], max: metricChartDomain[1] } : null, [metricChartDomain, rangeAxis]);
+  const selectedActivity = useMemo(() => detail
+    ? deriveSelectedActivity(detail, activityRecords, activityMetricSelection, heartRateZoneUpperBoundsBpm) : null,
+    [activityMetricSelection, activityRecords, detail, heartRateZoneUpperBoundsBpm]);
+  const isSegment = selectedActivity?.selection != null;
+  const chartSamples = useMemo(() => {
+    if (!detail) return [];
+    const zoom = chartZoomDomain ? resolveActivityRange(detail, activityRecords,
+      { axis: rangeAxis, min: chartZoomDomain[0], max: chartZoomDomain[1] }) : null;
+    if (zoom && !zoom.elapsedRange) return [];
+    return activityChartSamples(detail, activityRecords, zoom?.elapsedRange ?? null, shouldHidePausedTime, chartMaxSamples)
+      .filter((record) => chartXAxisMode !== 'distance' || record.distanceM != null);
+  }, [activityRecords, chartMaxSamples, chartXAxisMode, chartZoomDomain, detail, rangeAxis, shouldHidePausedTime]);
+  const decouplingRequest = useMemo<AerobicDecouplingRequest | null>(() => {
+    const range = selectedActivity?.elapsedRange;
+    if (!detail || !showDecoupling || !range || range[1] <= range[0]) return null;
+    return { activityId: detail.summary.id, range: { axis: 'elapsedTime', min: range[0], max: range[1] } };
+  }, [detail, selectedActivity?.elapsedRange?.[0], selectedActivity?.elapsedRange?.[1], isSegment, showDecoupling]);
+  const decoupling = useActivityDecoupling(decouplingRequest, dataVersion);
+  const resetChart = () => {
+    chartZoom.clearSelection();
+    chartZoom.setZoomDomain(null);
+    setHoveredHeartRateZoneIndex(null);
+    routeMapRef.current?.clearHoverTarget();
+  };
+  const changeXAxisMode = (mode: ChartXAxisMode) => { resetChart(); setSelectedChartXAxisMode(mode); };
+  const changePauseVisibility = (hide: boolean) => { resetChart(); setHidePausedTime(hide); };
 
   const combinedChart = useMemo<CombinedChartModel>(() => {
     if (!detail) {
@@ -1100,9 +1104,7 @@ export function ActivityDetailPage() {
       >
     > =
       chartSamples.map((sample) => {
-        const estimatedDistanceM =
-          totalDistanceM > 0 ? (sample.elapsedSeconds / totalDurationSeconds) * totalDistanceM : lastDistanceM;
-        const distanceM = Math.max(lastDistanceM, sample.distanceM ?? estimatedDistanceM);
+        const distanceM = sample.distanceM ?? lastDistanceM;
         lastDistanceM = distanceM;
 
         const speedKmh = sample.speedMps != null ? sample.speedMps * 3.6 : null;
@@ -1184,206 +1186,6 @@ export function ActivityDetailPage() {
       maxElapsedSeconds
     };
   }, [chartOutlierRemoval, chartSamples, detail, chartSeriesVisibility, shouldHidePausedTime]);
-
-  const fullChartXAxisDomain = useMemo<ChartZoomDomain>(() => {
-    if (chartXAxisMode === 'time') {
-      const summaryDurationSeconds = detail
-        ? Math.max(
-            0,
-            shouldHidePausedTime ? detail.summary.movingDurationSeconds : detail.summary.durationSeconds
-          )
-        : 0;
-      return [0, Math.max(60, summaryDurationSeconds, combinedChart.maxElapsedSeconds)];
-    }
-
-    const summaryDistanceKm = detail ? Math.max(0, detail.summary.distanceM) / 1000 : 0;
-    return [0, Math.max(0.1, summaryDistanceKm, combinedChart.maxDistanceKm)];
-  }, [chartXAxisMode, combinedChart.maxDistanceKm, combinedChart.maxElapsedSeconds, detail, shouldHidePausedTime]);
-  const minChartZoomSpan = chartXAxisMode === 'distance' ? CHART_MIN_ZOOM_SPAN_KM : CHART_MIN_ZOOM_SPAN_SECONDS;
-  const chartXAxisValues = useMemo(
-    () =>
-      combinedChart.data.map((point) =>
-        chartXAxisMode === 'distance' ? point.distanceKm : point.elapsedSeconds
-      ),
-    [chartXAxisMode, combinedChart.data]
-  );
-  const chartZoom = usePlotDragZoom<number>({
-    parseLabel: parseNumberChartLabel,
-    compareValues: (left, right) => left - right,
-    values: chartXAxisValues,
-    normalizeDomain: (anchor, current) => {
-      const min = Math.max(0, Math.min(anchor, current));
-      const max = Math.min(fullChartXAxisDomain[1], Math.max(anchor, current));
-
-      if (!Number.isFinite(min) || !Number.isFinite(max) || max - min < minChartZoomSpan) {
-        return null;
-      }
-
-      return [min, max];
-    },
-    areValuesEqual: (left, right) => Math.abs(left - right) < 1e-6,
-    areDomainsEqual: (left, right) =>
-      areDomainsEqual(left, right, (first, second) => Math.abs(first - second) < Number.EPSILON * 100),
-    onPointerMove: (event) => {
-      routeMapRef.current?.setHoverTarget(readHoveredRouteCoordinate(event));
-    }
-  });
-
-  const chartZoomDomain = chartZoom.zoomDomain;
-  const chartSelectionDomain = chartZoom.selectionDomain;
-  const setChartZoomDomain = chartZoom.setZoomDomain;
-  const activeChartXAxisDomain = chartZoomDomain ?? fullChartXAxisDomain;
-  const chartSampleDistanceZoomDomain = chartXAxisMode === 'distance' ? chartZoomDomain : null;
-  const metricChartDomain =
-    chartSelectionDomain && chartSelectionDomain[1] - chartSelectionDomain[0] >= minChartZoomSpan
-      ? chartSelectionDomain
-      : chartZoomDomain;
-  const activityMetricSelection = useMemo<ActivityRange | null>(
-    () =>
-      metricChartDomain
-        ? {
-            axis:
-              chartXAxisMode === 'distance'
-                ? 'distance'
-                : shouldHidePausedTime
-                  ? 'movingTime'
-                  : 'elapsedTime',
-            min: metricChartDomain[0],
-            max: metricChartDomain[1]
-          }
-        : null,
-    [chartXAxisMode, metricChartDomain, shouldHidePausedTime]
-  );
-  const selectedActivity = useMemo(
-    () =>
-      detail
-        ? deriveSelectedActivity(
-            detail,
-            activityRecords,
-            activityMetricSelection,
-            heartRateZoneUpperBoundsBpm
-          )
-        : null,
-    [activityMetricSelection, activityRecords, detail, heartRateZoneUpperBoundsBpm]
-  );
-
-  useEffect(() => {
-    decouplingRequestRef.current += 1;
-    const requestId = decouplingRequestRef.current;
-
-    if (!detail || !isFitRunningActivity) {
-      setDecouplingResult(EMPTY_DECOUPLING_RESULT);
-      return;
-    }
-
-    let range: AerobicDecouplingRange | undefined;
-    if (chartZoomDomain) {
-      range = {
-        axis:
-          chartXAxisMode === 'distance'
-            ? 'distance'
-            : shouldHidePausedTime
-              ? 'movingTime'
-              : 'elapsedTime',
-        min: chartZoomDomain[0],
-        max: chartZoomDomain[1]
-      };
-    }
-
-    setDecouplingResult(EMPTY_DECOUPLING_RESULT);
-    const loadDecoupling = async () => {
-      try {
-        const response = await getAerobicDecoupling({
-          activityId: detail.summary.id,
-          range
-        });
-        if (decouplingRequestRef.current === requestId) {
-          setDecouplingResult(response);
-        }
-      } catch (err) {
-        if (decouplingRequestRef.current === requestId) {
-          setDecouplingResult(EMPTY_DECOUPLING_RESULT);
-          console.error('Failed to calculate aerobic decoupling', err);
-        }
-      }
-    };
-
-    void loadDecoupling();
-  }, [
-    chartXAxisMode,
-    chartZoomDomain,
-    detail,
-    isFitRunningActivity,
-    shouldHidePausedTime
-  ]);
-
-  useEffect(() => {
-    if (!detail) {
-      return;
-    }
-
-    setChartZoomDomain(null);
-    chartZoom.clearSelection();
-  }, [chartXAxisMode, chartZoom.clearSelection, detail?.summary.id, setChartZoomDomain, shouldHidePausedTime]);
-
-  useEffect(() => {
-    if (!detail) {
-      return;
-    }
-
-    const query = {
-      distanceMinKm: chartSampleDistanceZoomDomain?.[0],
-      distanceMaxKm: chartSampleDistanceZoomDomain?.[1],
-      maxSamples: chartMaxSamples,
-      hidePauses: shouldHidePausedTime
-    };
-    const requestId = chartSamplesRequestRef.current + 1;
-    chartSamplesRequestRef.current = requestId;
-
-    const loadSamples = async () => {
-      try {
-        const response = await getActivitySamples(detail.summary.id, query);
-        if (chartSamplesRequestRef.current !== requestId) {
-          return;
-        }
-
-        setChartSamples(response.samples);
-      } catch (err) {
-        if (chartSamplesRequestRef.current !== requestId) {
-          return;
-        }
-        console.error('Failed to refresh chart samples', err);
-      }
-    };
-
-    void loadSamples();
-  }, [chartMaxSamples, chartSampleDistanceZoomDomain, detail?.summary.id, shouldHidePausedTime]);
-
-  useEffect(() => {
-    if (!detail) {
-      return;
-    }
-
-    const requestId = activityRecordsRequestRef.current + 1;
-    activityRecordsRequestRef.current = requestId;
-
-    const loadActivityRecords = async () => {
-      try {
-        const response = await getActivitySamples(detail.summary.id, { downsample: false });
-        if (activityRecordsRequestRef.current !== requestId) {
-          return;
-        }
-        setActivityRecords(response.samples);
-      } catch (err) {
-        if (activityRecordsRequestRef.current !== requestId) {
-          return;
-        }
-        console.error('Failed to load activity records for metrics', err);
-      }
-    };
-
-    void loadActivityRecords();
-  }, [detail?.summary.id]);
 
   const heartRateZoneBreakdown = selectedActivity?.metrics.heartRateZones ?? null;
   const heartRateZoneHighlightSegments = useMemo(
@@ -1490,7 +1292,7 @@ export function ActivityDetailPage() {
     return <p className="rounded-lg bg-accent/20 p-3 text-sm text-accent">{error}</p>;
   }
 
-  if (!detail) {
+  if (!detail || !selectedActivity) {
     return <p className="text-sm text-muted">Activity not found.</p>;
   }
 
@@ -1499,25 +1301,6 @@ export function ActivityDetailPage() {
   const backLabel = navigationState?.fromLabel ?? 'Back to Activities';
   const backToAnalytics = backPath === '/analytics';
 
-  const showDistance = detail.summary.distanceM > 0;
-  const showElevationGain = detail.summary.elevationGainM > 0;
-  const showAvgSpeedPace = detail.summary.avgSpeedMps != null && detail.summary.avgSpeedMps > 0;
-  const activityMetrics = selectedActivity?.metrics ?? {
-    durationSeconds: detail.summary.durationSeconds,
-    movingDurationSeconds: detail.summary.movingDurationSeconds,
-    pausedDurationSeconds: Math.max(
-      0,
-      detail.summary.durationSeconds - detail.summary.movingDurationSeconds
-    ),
-    avgHr: detail.summary.avgHr,
-    minHr: detail.summary.minHr,
-    maxHr: detail.summary.maxHr,
-    heartRateZones: null
-  };
-  const hasAnyHeartRate =
-    activityMetrics.avgHr != null || activityMetrics.minHr != null || activityMetrics.maxHr != null;
-  const pauseCount = selectedActivity?.overlappingPauseCount ?? detail.pauseSegments.length;
-  const showPausedTime = pauseCount > 0 && activityMetrics.pausedDurationSeconds > 0.5;
   const chartTitle =
     chartXAxisMode === 'distance'
       ? 'Performance vs Distance'
@@ -1530,26 +1313,6 @@ export function ActivityDetailPage() {
       : shouldHidePausedTime
         ? 'X-axis uses moving time with paused segments collapsed.'
         : 'X-axis uses elapsed time with paused segments visible.';
-
-  let heartRateValue: string | null = null;
-  let heartRateSubLabel: string | undefined;
-
-  if (hasAnyHeartRate) {
-    if (activityMetrics.avgHr != null) {
-      heartRateValue = `Avg ${Math.round(activityMetrics.avgHr)} bpm`;
-      const heartRateDetails = [
-        activityMetrics.minHr != null ? `Min ${Math.round(activityMetrics.minHr)} bpm` : null,
-        activityMetrics.maxHr != null ? `Max ${Math.round(activityMetrics.maxHr)} bpm` : null
-      ].filter((part): part is string => part != null);
-      heartRateSubLabel = heartRateDetails.length > 0 ? heartRateDetails.join(' · ') : undefined;
-    } else if (activityMetrics.minHr != null && activityMetrics.maxHr != null) {
-      heartRateValue = `${Math.round(activityMetrics.minHr)}-${Math.round(activityMetrics.maxHr)} bpm`;
-    } else if (activityMetrics.minHr != null) {
-      heartRateValue = `Min ${Math.round(activityMetrics.minHr)} bpm`;
-    } else if (activityMetrics.maxHr != null) {
-      heartRateValue = `Max ${Math.round(activityMetrics.maxHr)} bpm`;
-    }
-  }
 
   return (
     <div className="space-y-6">
@@ -1668,18 +1431,20 @@ export function ActivityDetailPage() {
                 <div className="flex flex-wrap items-start justify-end gap-2">
                   {hasPauseSegments && chartXAxisMode === 'time' ? (
                     <div className="shrink-0">
-                      <PauseVisibilityToggle hidePauses={hidePausedTime} onChange={setHidePausedTime} />
+                      <PauseVisibilityToggle hidePauses={shouldHidePausedTime} onChange={changePauseVisibility} />
                     </div>
                   ) : null}
-                  {hasGpsTrack ? (
+                  {hasDistanceAxis ? (
                     <div className="shrink-0">
                       <XAxisModeToggle
                         mode={chartXAxisMode}
-                        showDistance={hasGpsTrack}
-                        onChange={setSelectedChartXAxisMode}
+                        showDistance={hasDistanceAxis}
+                        onChange={changeXAxisMode}
                       />
                     </div>
                   ) : null}
+                  {chartZoomDomain || isSegment ? <button type="button" onClick={resetChart}
+                    className="rounded-md border border-border px-3 py-2 text-xs text-muted hover:text-foreground">Show Full Workout</button> : null}
                   <div className="shrink-0">
                     <ChartModeToggle mode={chartMode} onChange={setChartMode} />
                   </div>
@@ -1687,21 +1452,20 @@ export function ActivityDetailPage() {
               </div>
             </div>
 
-            {isFitRunningActivity ? (
-              <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/70 pt-3">
-                <span className="rounded-md border border-border px-2.5 py-1.5 text-xs text-muted">
-                  HR Decoupling/Drift
-                </span>
+            {showDecoupling ? (
+              <div className="space-y-2 border-t border-border/70 pt-3" aria-live="polite">
                 <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1 text-sm font-medium text-foreground">
-                  {decouplingResult.paceHrDecouplingPct != null ? (
-                    <span>
-                      Pace–HR decoupling: {formatDriftPercentage(decouplingResult.paceHrDecouplingPct)}
-                    </span>
-                  ) : null}
-                  {decouplingResult.heartRateDriftPct != null ? (
-                    <span>Heart Rate Drift: {formatDriftPercentage(decouplingResult.heartRateDriftPct)}</span>
-                  ) : null}
+                  <span>{activityMetricLabel('Pace–HR decoupling', isSegment)}: {decoupling.loading ? 'Calculating…'
+                    : decoupling.response?.paceHrDecouplingPct != null ? formatDriftPercentage(decoupling.response.paceHrDecouplingPct) : 'Unavailable'}</span>
+                  <span>{activityMetricLabel('Heart Rate Drift', isSegment)}: {decoupling.loading ? 'Calculating…'
+                    : decoupling.response?.heartRateDriftPct != null ? formatDriftPercentage(decoupling.response.heartRateDriftPct) : 'Unavailable'}</span>
                 </div>
+                <p className="text-right text-xs text-muted">
+                  {decoupling.error ? 'Unable to calculate this range. Try selecting it again.' : decoupling.loading ? 'Calculating the current range…'
+                    : decoupling.response?.paceHrDecouplingPct == null
+                      ? decouplingUnavailableMessage(decoupling.response?.paceHrDecouplingUnavailableReason)
+                      : 'Compares the first and second halves of active time, excluding recorded pauses.'}
+                </p>
               </div>
             ) : null}
 
@@ -1784,7 +1548,7 @@ export function ActivityDetailPage() {
                             strokeWidth={1}
                             dot={false}
                             activeDot={false}
-                            connectNulls
+                            connectNulls={false}
                             isAnimationActive={CHART_IS_ANIMATION_ACTIVE}
                           />
                         ) : null}
@@ -1796,7 +1560,7 @@ export function ActivityDetailPage() {
                             stroke={CHART_LINE_COLORS.pace}
                             strokeWidth={2}
                             dot={false}
-                            connectNulls
+                            connectNulls={false}
                             activeDot={CHART_LINE_ACTIVE_DOT}
                             isAnimationActive={CHART_IS_ANIMATION_ACTIVE}
                           />
@@ -1809,7 +1573,7 @@ export function ActivityDetailPage() {
                             stroke={CHART_LINE_COLORS.heartRate}
                             strokeWidth={2}
                             dot={false}
-                            connectNulls
+                            connectNulls={false}
                             activeDot={CHART_LINE_ACTIVE_DOT}
                             isAnimationActive={CHART_IS_ANIMATION_ACTIVE}
                           />
@@ -1822,7 +1586,7 @@ export function ActivityDetailPage() {
                             stroke={CHART_LINE_COLORS.cadence}
                             strokeWidth={2}
                             dot={false}
-                            connectNulls
+                            connectNulls={false}
                             activeDot={CHART_LINE_ACTIVE_DOT}
                             isAnimationActive={CHART_IS_ANIMATION_ACTIVE}
                           />
@@ -1835,7 +1599,7 @@ export function ActivityDetailPage() {
                             stroke={CHART_LINE_COLORS.power}
                             strokeWidth={2}
                             dot={false}
-                            connectNulls
+                            connectNulls={false}
                             activeDot={CHART_LINE_ACTIVE_DOT}
                             isAnimationActive={CHART_IS_ANIMATION_ACTIVE}
                           />
@@ -1848,7 +1612,7 @@ export function ActivityDetailPage() {
                             stroke={CHART_LINE_COLORS.speed}
                             strokeWidth={2}
                             dot={false}
-                            connectNulls
+                            connectNulls={false}
                             activeDot={CHART_LINE_ACTIVE_DOT}
                             isAnimationActive={CHART_IS_ANIMATION_ACTIVE}
                           />
@@ -2021,53 +1785,22 @@ export function ActivityDetailPage() {
 
           {heartRateZoneBreakdown ? (
             <HeartRateZonesCard
+              isSegment={isSegment}
               slices={heartRateZoneBreakdown.slices}
               trackedSeconds={heartRateZoneBreakdown.trackedSeconds}
               hoveredZoneIndex={hoveredHeartRateZoneIndex}
               onHoverZoneChange={setHoveredHeartRateZoneIndex}
             />
+          ) : isSegment ? (
+            <section className="rounded-xl border border-border bg-panel p-4">
+              <h3 className="text-lg font-semibold">Heart Rate Zones (Segment)</h3>
+              <p className="mt-2 text-sm text-muted">Unavailable: no recorded heart-rate intervals in this segment.</p>
+            </section>
           ) : null}
         </div>
 
         <aside className="order-1 xl:order-2">
-          <div className="space-y-4 xl:sticky xl:top-4">
-            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">
-              <MetricCard label="Duration" value={formatDuration(activityMetrics.durationSeconds)} />
-              <MetricCard
-                label="Moving Time"
-                value={formatDuration(activityMetrics.movingDurationSeconds)}
-              />
-              {showPausedTime ? (
-                <MetricCard
-                  label="Paused Time"
-                  value={formatDuration(activityMetrics.pausedDurationSeconds)}
-                  subLabel={
-                    pauseCount === 1
-                      ? '1 manual pause'
-                      : `${pauseCount} manual pauses`
-                  }
-                />
-              ) : null}
-              {showDistance ? (
-                <MetricCard label="Distance" value={formatDistanceKm(detail.summary.distanceM)} />
-              ) : null}
-              {showAvgSpeedPace ? (
-                <MetricCard
-                  label="Avg Speed / Pace"
-                  value={`${formatSpeedKmh(detail.summary.avgSpeedMps)} · ${formatPaceMinKm(detail.summary.avgSpeedMps)}`}
-                />
-              ) : null}
-              {showElevationGain ? (
-                <MetricCard
-                  label="Elevation Gain"
-                  value={`${Math.round(detail.summary.elevationGainM)} m`}
-                />
-              ) : null}
-              {heartRateValue ? (
-                <MetricCard label="Heart Rate" value={heartRateValue} subLabel={heartRateSubLabel} />
-              ) : null}
-            </div>
-          </div>
+          <ActivityMetricsPanel detail={detail} records={activityRecords} selected={selectedActivity} />
         </aside>
       </div>
     </div>

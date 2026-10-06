@@ -27,6 +27,7 @@ export type PlotDomain<T> = [T, T];
 export type PlotPointer<T> = { value: T; chartX: number };
 
 export function parseNumberChartLabel(label: unknown): number | null {
+  if (typeof label !== 'number' && (typeof label !== 'string' || label.trim() === '')) return null;
   const value = Number(label);
   return Number.isFinite(value) ? value : null;
 }
@@ -49,6 +50,7 @@ export function readChartPointer<T>(
     return null;
   }
 
+  if (maybePointer.chartX == null) return null;
   const chartX = Number(maybePointer.chartX);
   if (!Number.isFinite(chartX)) {
     return null;

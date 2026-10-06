@@ -4,6 +4,7 @@ import {
   addMonths,
   eachDayOfInterval,
   eachWeekOfInterval,
+  endOfDay,
   endOfMonth,
   endOfWeek,
   format,
@@ -141,8 +142,8 @@ export function DashboardPage() {
       return !Number.isNaN(date.getTime()) && date >= start && date <= end;
     };
 
-    const weekActivities = allActivities.filter((activity) => isInRange(activity, weekStart, today));
-    const ytdActivities = allActivities.filter((activity) => isInRange(activity, yearStart, today));
+    const weekActivities = allActivities.filter((activity) => isInRange(activity, weekStart, endOfDay(today)));
+    const ytdActivities = allActivities.filter((activity) => isInRange(activity, yearStart, endOfDay(today)));
 
     return {
       weeklySummary: summarizeActivities(weekActivities),

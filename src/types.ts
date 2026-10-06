@@ -112,9 +112,17 @@ export interface AerobicDecouplingRequest {
   range?: AerobicDecouplingRange;
 }
 
+export type AerobicDecouplingUnavailableReason =
+  | 'insufficientSamples'
+  | 'insufficientDuration'
+  | 'insufficientHeartRate'
+  | 'insufficientSpeed';
+
 export interface AerobicDecouplingResponse {
   paceHrDecouplingPct: number | null;
   heartRateDriftPct: number | null;
+  paceHrDecouplingUnavailableReason?: AerobicDecouplingUnavailableReason;
+  heartRateDriftUnavailableReason?: AerobicDecouplingUnavailableReason;
 }
 
 export interface HeatmapData {

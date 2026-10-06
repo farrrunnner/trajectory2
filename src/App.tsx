@@ -1,7 +1,7 @@
 import { Suspense, lazy, useEffect, useRef } from 'react';
 import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
-import { advancedAnalyticsRequestCacheKey } from '@/lib/analytics/cacheKey';
+import { advancedAnalyticsDataVersion, advancedAnalyticsRequestCacheKey } from '@/lib/analytics/cacheKey';
 import { resolveAdvancedAnalyticsTimeRange } from '@/lib/analytics/timeRange';
 import { runAdvancedAnalytics } from '@/lib/tauri';
 import { Sidebar } from '@/components/Sidebar';
@@ -144,8 +144,8 @@ export default function App() {
 
   useEffect(() => {
     const importFolderPath = settings?.importFolderPath;
-    const dataVersion = settings?.lastScanTimestamp ?? null;
-    if (loadingSettings || scanning || !importFolderPath || !scanDone || !dataVersion) {
+    const dataVersion = advancedAnalyticsDataVersion(settings);
+    if (loadingSettings || scanning || !importFolderPath || !scanDone || !settings?.lastScanTimestamp) {
       return;
     }
 
@@ -153,7 +153,7 @@ export default function App() {
       return;
     }
 
-    const startupDataVersionKey = `${importFolderPath}:${dataVersion}`;
+    const startupDataVersionKey = JSON.stringify({ dataVersion, metrics, streaks, charts });
     if (startupAdvancedAnalyticsDataVersion.current === startupDataVersionKey) {
       return;
     }
@@ -206,6 +206,7 @@ export default function App() {
 
     return () => {
       cancelled = true;
+      startupAdvancedAnalyticsDataVersion.current = null;
     };
   }, [
     charts,
@@ -216,6 +217,7 @@ export default function App() {
     setCachedAdvancedAnalytics,
     settings?.importFolderPath,
     settings?.lastScanTimestamp,
+    settings?.heartRateZoneUpperBoundsBpm,
     streaks
   ]);
 

@@ -3,7 +3,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 
 import { AnalyticsLibrary } from '@/components/analytics/AnalyticsLibrary';
 import { TransferSelectionPanel } from '@/components/analytics/TransferSelectionPanel';
-import { advancedAnalyticsRequestCacheKey } from '@/lib/analytics/cacheKey';
+import { advancedAnalyticsDataVersion, advancedAnalyticsRequestCacheKey } from '@/lib/analytics/cacheKey';
 import {
   buildAdvancedAnalyticsTransferFile,
   mergeAdvancedAnalyticsTransferData,
@@ -156,7 +156,7 @@ export function AdvancedAnalyticsPage() {
     }
   }, [charts, metrics, selectedItem, setSelectedItem, streaks]);
 
-  const dataVersion = settings?.lastScanTimestamp ?? null;
+  const dataVersion = advancedAnalyticsDataVersion(settings);
 
   const validationIssues = useMemo(
     () => validateAdvancedAnalyticsDefinitions({ metrics, streaks, charts }),

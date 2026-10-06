@@ -2,11 +2,12 @@ use anyhow::{anyhow, Result};
 
 use crate::models::{
     ActivitySample, AerobicDecouplingRange, AerobicDecouplingRangeAxis, AerobicDecouplingRequest,
-    AerobicDecouplingResponse, PauseSegment,
+    AerobicDecouplingResponse, AerobicDecouplingUnavailableReason, PauseSegment,
 };
 
 const MAX_OBSERVED_INTERVAL_SECONDS: f64 = 30.0;
 const MIN_COVERAGE_RATIO: f64 = 0.8;
+const MIN_ACTIVE_DURATION_SECONDS: f64 = 60.0;
 
 #[derive(Debug, Clone, Copy)]
 struct IntervalPiece {
@@ -79,18 +80,130 @@ pub fn calculate_aerobic_decoupling(
     if let Some(range) = &request.range {
         validate_range(range)?;
     }
-    let pieces = build_interval_pieces(samples, pause_segments, request.range.as_ref());
+    use AerobicDecouplingUnavailableReason::*;
+    let samples = normalized_samples(samples);
+    let pause_segments = normalized_pauses(pause_segments);
+    if samples.len() < 3 {
+        return Ok(unavailable(InsufficientSamples));
+    }
+    let mut pieces = build_interval_pieces(&samples, &pause_segments, request.range.as_ref());
+    // A selected interval includes missing coverage at its edges as well as interior gaps.
+    if let Some(range) = request
+        .range
+        .as_ref()
+        .filter(|range| range.axis == AerobicDecouplingRangeAxis::ElapsedTime)
+    {
+        let first = samples.first().unwrap().elapsed_seconds;
+        let last = samples.last().unwrap().elapsed_seconds;
+        let mut prefix = unobserved_pieces(range.min, first.min(range.max), &pause_segments);
+        prefix.append(&mut pieces);
+        prefix.extend(unobserved_pieces(
+            last.max(range.min),
+            range.max,
+            &pause_segments,
+        ));
+        pieces = prefix;
+    }
+    let total_duration: f64 = pieces.iter().map(|piece| piece.duration_seconds).sum();
+    if total_duration + f64::EPSILON < MIN_ACTIVE_DURATION_SECONDS {
+        return Ok(unavailable(InsufficientDuration));
+    }
     let (first, second) = split_pieces_in_half(&pieces);
+    let heart_rate_drift_pct =
+        percentage_increase(first.average_heart_rate(), second.average_heart_rate());
+    let pace_hr_decoupling_pct =
+        percentage_decline(first.efficiency_factor(), second.efficiency_factor());
     Ok(AerobicDecouplingResponse {
-        pace_hr_decoupling_pct: percentage_decline(
-            first.efficiency_factor(),
-            second.efficiency_factor(),
-        ),
-        heart_rate_drift_pct: percentage_increase(
-            first.average_heart_rate(),
-            second.average_heart_rate(),
-        ),
+        pace_hr_decoupling_pct,
+        heart_rate_drift_pct,
+        pace_hr_decoupling_unavailable_reason: if pace_hr_decoupling_pct.is_some() {
+            None
+        } else if heart_rate_drift_pct.is_none() {
+            Some(InsufficientHeartRate)
+        } else {
+            Some(InsufficientSpeed)
+        },
+        heart_rate_drift_unavailable_reason: heart_rate_drift_pct
+            .is_none()
+            .then_some(InsufficientHeartRate),
     })
+}
+
+fn unavailable(reason: AerobicDecouplingUnavailableReason) -> AerobicDecouplingResponse {
+    AerobicDecouplingResponse {
+        pace_hr_decoupling_pct: None,
+        heart_rate_drift_pct: None,
+        pace_hr_decoupling_unavailable_reason: Some(reason),
+        heart_rate_drift_unavailable_reason: Some(reason),
+    }
+}
+
+fn unobserved_pieces(start: f64, end: f64, pauses: &[PauseSegment]) -> Vec<IntervalPiece> {
+    if end <= start {
+        return Vec::new();
+    }
+    active_segments(start, end, pauses)
+        .into_iter()
+        .map(|(start, end)| IntervalPiece {
+            duration_seconds: end - start,
+            observed: false,
+            heart_rate: None,
+            speed_mps: None,
+        })
+        .collect()
+}
+
+fn normalized_samples(samples: &[ActivitySample]) -> Vec<ActivitySample> {
+    let mut sorted: Vec<_> = samples
+        .iter()
+        .filter(|sample| sample.elapsed_seconds.is_finite() && sample.elapsed_seconds >= 0.0)
+        .cloned()
+        .collect();
+    sorted.sort_by(|a, b| a.elapsed_seconds.total_cmp(&b.elapsed_seconds));
+    let mut output: Vec<ActivitySample> = Vec::new();
+    for sample in sorted {
+        if let Some(previous) = output
+            .last_mut()
+            .filter(|previous| previous.elapsed_seconds == sample.elapsed_seconds)
+        {
+            previous.heart_rate = valid_positive(sample.heart_rate).or(previous.heart_rate);
+            previous.speed_mps = valid_non_negative(sample.speed_mps).or(previous.speed_mps);
+            previous.distance_m = valid_non_negative(sample.distance_m).or(previous.distance_m);
+        } else {
+            output.push(sample);
+        }
+    }
+    output
+}
+
+fn normalized_pauses(pauses: &[PauseSegment]) -> Vec<PauseSegment> {
+    let mut sorted: Vec<_> = pauses
+        .iter()
+        .filter(|pause| {
+            pause.start_elapsed_seconds.is_finite()
+                && pause.end_elapsed_seconds.is_finite()
+                && pause.end_elapsed_seconds > pause.start_elapsed_seconds.max(0.0)
+        })
+        .cloned()
+        .collect();
+    sorted.sort_by(|a, b| a.start_elapsed_seconds.total_cmp(&b.start_elapsed_seconds));
+    let mut output: Vec<PauseSegment> = Vec::new();
+    for mut pause in sorted {
+        pause.start_elapsed_seconds = pause.start_elapsed_seconds.max(0.0);
+        if let Some(previous) = output
+            .last_mut()
+            .filter(|previous| pause.start_elapsed_seconds <= previous.end_elapsed_seconds)
+        {
+            previous.end_elapsed_seconds =
+                previous.end_elapsed_seconds.max(pause.end_elapsed_seconds);
+            previous.duration_seconds =
+                previous.end_elapsed_seconds - previous.start_elapsed_seconds;
+        } else {
+            pause.duration_seconds = pause.end_elapsed_seconds - pause.start_elapsed_seconds;
+            output.push(pause);
+        }
+    }
+    output
 }
 
 fn validate_range(range: &AerobicDecouplingRange) -> Result<()> {
@@ -125,10 +238,22 @@ fn build_interval_pieces(
         }
 
         let observed = raw_duration <= MAX_OBSERVED_INTERVAL_SECONDS;
-        let speed_mps = interval_speed(current, next, raw_duration);
-        let heart_rate = valid_positive(current.heart_rate);
+        let active = active_segments(start, end, pause_segments);
+        let active_duration: f64 = active.iter().map(|(start, end)| end - start).sum();
+        if active_duration <= 0.0 {
+            continue;
+        }
+        let speed_mps = interval_speed(current, next, active_duration);
+        let heart_rate = if pause_segments
+            .iter()
+            .any(|pause| start >= pause.start_elapsed_seconds && start < pause.end_elapsed_seconds)
+        {
+            None
+        } else {
+            valid_positive(current.heart_rate)
+        };
 
-        for (active_start, active_end) in active_segments(start, end, pause_segments) {
+        for (active_start, active_end) in active {
             let Some(duration_seconds) = clipped_segment_duration(
                 active_start,
                 active_end,
@@ -256,7 +381,7 @@ fn interval_speed(
         valid_non_negative(next.distance_m),
     ) {
         let distance_delta = end_distance - start_distance;
-        if distance_delta > 0.0 {
+        if distance_delta >= 0.0 {
             return Some(distance_delta / duration_seconds);
         }
     }
@@ -433,9 +558,12 @@ mod tests {
             sample(10.0, None, Some(3.0), Some(200.0)),
             sample(30.0, None, Some(3.0), Some(200.0)),
             sample(40.0, None, Some(3.0), Some(200.0)),
+            sample(50.0, None, Some(3.0), Some(200.0)),
+            sample(70.0, None, Some(3.0), Some(200.0)),
+            sample(80.0, None, Some(3.0), Some(200.0)),
         ];
         let result = calculate_aerobic_decoupling(&request(None), &samples, &[]).unwrap();
-        assert_close(result.heart_rate_drift_pct, 33.333_333_3);
+        assert_close(result.heart_rate_drift_pct, 14.285_714_3);
     }
 
     #[test]
@@ -515,5 +643,142 @@ mod tests {
             assert!(result.pace_hr_decoupling_pct.is_some());
             assert!(result.heart_rate_drift_pct.is_some());
         }
+    }
+
+    #[test]
+    fn short_segments_report_the_duration_requirement() {
+        let samples = constant_half_samples(140.0, 150.0, 3.0, 3.0);
+        let result = calculate_aerobic_decoupling(
+            &request(Some(AerobicDecouplingRange {
+                axis: AerobicDecouplingRangeAxis::ElapsedTime,
+                min: 20.0,
+                max: 40.0,
+            })),
+            &samples,
+            &[],
+        )
+        .unwrap();
+        assert_eq!(result.pace_hr_decoupling_pct, None);
+        assert_eq!(
+            result.pace_hr_decoupling_unavailable_reason,
+            Some(AerobicDecouplingUnavailableReason::InsufficientDuration)
+        );
+    }
+
+    #[test]
+    fn selected_range_counts_missing_data_at_both_edges() {
+        let samples = constant_half_samples(140.0, 140.0, 3.0, 3.0);
+        for (min, max) in [(0.0, 200.0), (0.0, 100.0)] {
+            let mut shifted = samples.clone();
+            if max == 100.0 {
+                for sample in &mut shifted {
+                    sample.elapsed_seconds += 50.0;
+                }
+            }
+            let result = calculate_aerobic_decoupling(
+                &request(Some(AerobicDecouplingRange {
+                    axis: AerobicDecouplingRangeAxis::ElapsedTime,
+                    min,
+                    max,
+                })),
+                &shifted,
+                &[],
+            )
+            .unwrap();
+            assert_eq!(result.heart_rate_drift_pct, None);
+            assert_eq!(
+                result.heart_rate_drift_unavailable_reason,
+                Some(AerobicDecouplingUnavailableReason::InsufficientHeartRate)
+            );
+        }
+    }
+
+    #[test]
+    fn stationary_distance_does_not_fall_back_to_a_stale_speed_reading() {
+        let mut samples = constant_half_samples(140.0, 140.0, 3.0, 3.0);
+        for sample in &mut samples {
+            sample.distance_m = Some(0.0);
+        }
+        let result = calculate_aerobic_decoupling(&request(None), &samples, &[]).unwrap();
+        assert_close(result.heart_rate_drift_pct, 0.0);
+        assert_eq!(result.pace_hr_decoupling_pct, None);
+        assert_eq!(
+            result.pace_hr_decoupling_unavailable_reason,
+            Some(AerobicDecouplingUnavailableReason::InsufficientSpeed)
+        );
+    }
+
+    #[test]
+    fn missing_hr_in_one_half_is_not_hidden_by_good_coverage_in_the_other() {
+        let mut samples = constant_half_samples(140.0, 140.0, 3.0, 3.0);
+        samples[0].heart_rate = None;
+        samples[1].heart_rate = None;
+        let result = calculate_aerobic_decoupling(&request(None), &samples, &[]).unwrap();
+        assert_eq!(result.heart_rate_drift_pct, None);
+    }
+
+    #[test]
+    fn unsorted_duplicate_samples_and_overlapping_pauses_are_normalized() {
+        let mut samples = constant_half_samples(140.0, 140.0, 3.0, 3.0);
+        let mut duplicate = samples[3].clone();
+        duplicate.heart_rate = None;
+        samples.push(duplicate);
+        samples.reverse();
+        let pauses = vec![
+            PauseSegment {
+                start_elapsed_seconds: 30.0,
+                end_elapsed_seconds: 50.0,
+                duration_seconds: 999.0,
+                start_timestamp: None,
+                end_timestamp: None,
+            },
+            PauseSegment {
+                start_elapsed_seconds: 20.0,
+                end_elapsed_seconds: 40.0,
+                duration_seconds: 999.0,
+                start_timestamp: None,
+                end_timestamp: None,
+            },
+        ];
+        let result = calculate_aerobic_decoupling(&request(None), &samples, &pauses).unwrap();
+        assert_close(result.heart_rate_drift_pct, 0.0);
+        assert_close(result.pace_hr_decoupling_pct, 0.0);
+    }
+
+    #[test]
+    fn invalid_ranges_are_rejected() {
+        let samples = constant_half_samples(140.0, 140.0, 3.0, 3.0);
+        for (min, max) in [(30.0, 20.0), (0.0, 0.0), (-1.0, 100.0), (0.0, f64::NAN)] {
+            assert!(calculate_aerobic_decoupling(
+                &request(Some(AerobicDecouplingRange {
+                    axis: AerobicDecouplingRangeAxis::ElapsedTime,
+                    min,
+                    max,
+                })),
+                &samples,
+                &[]
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
+    fn distance_speed_uses_active_time_when_a_pause_splits_a_sample_interval() {
+        let samples: Vec<_> = (0..=10)
+            .map(|index| {
+                let elapsed = f64::from(index) * 10.0;
+                let active = elapsed - (elapsed - 25.0).clamp(0.0, 10.0);
+                sample(elapsed, Some(active * 3.0), None, Some(140.0))
+            })
+            .collect();
+        let pauses = vec![PauseSegment {
+            start_elapsed_seconds: 25.0,
+            end_elapsed_seconds: 35.0,
+            duration_seconds: 10.0,
+            start_timestamp: None,
+            end_timestamp: None,
+        }];
+        let result = calculate_aerobic_decoupling(&request(None), &samples, &pauses).unwrap();
+        assert_close(result.pace_hr_decoupling_pct, 0.0);
     }
 }
